@@ -50,7 +50,7 @@ class EbharApp extends StatelessWidget {
 }
 
 // -------------------------------------------------------------
-// شاشة تسجيل الدخول المحمية مع التحقق من تجميد الحساب وصلاحيات المستخدم
+// شاشة تسجيل الدخول والتحقق من حساب المستخدم من الشيت
 // -------------------------------------------------------------
 class SecureLoginScreen extends StatefulWidget {
   const SecureLoginScreen({super.key});
@@ -84,16 +84,15 @@ class _SecureLoginScreenState extends State<SecureLoginScreen> {
     });
 
     try {
-      final res = await http.post(
-        Uri.parse(kBackendUrl),
-        body: json.encode({
-          "action": "login",
-          "username": username,
-          "password": password,
-        }),
-      );
+      final uri = Uri.parse(kBackendUrl).replace(queryParameters: {
+        'action': 'login',
+        'username': username,
+        'password': password,
+      });
 
+      final res = await http.get(uri);
       final data = json.decode(res.body);
+
       if (data['ok'] == true) {
         _cachedUsername = username;
         _cachedPassword = password;
@@ -104,10 +103,10 @@ class _SecureLoginScreenState extends State<SecureLoginScreen> {
           ),
         );
       } else {
-        setState(() => _errorMsg = data['error'] ?? 'فشل تسجيل الدخول');
+        setState(() => _errorMsg = data['error'] ?? 'بيانات الدخول غير صحيحة');
       }
     } catch (e) {
-      setState(() => _errorMsg = 'تعذر الاتصال بالنظام للتحقق من الحساب: $e');
+      setState(() => _errorMsg = 'تعذر الاتصال بالنظام: $e');
     } finally {
       if (mounted) setState(() => _isLoading = false);
     }
@@ -115,7 +114,7 @@ class _SecureLoginScreenState extends State<SecureLoginScreen> {
 
   Future<void> _handleBiometricLogin() async {
     if (_cachedUsername == null || _cachedPassword == null) {
-      setState(() => _errorMsg = 'يجب تسجيل الدخول باسم المستخدم وكلمة المرور لأول مرة في هذه الجلسة');
+      setState(() => _errorMsg = 'يجب تسجيل الدخول بكلمة المرور لأول مرة');
       return;
     }
 
@@ -245,7 +244,7 @@ class _SecureLoginScreenState extends State<SecureLoginScreen> {
 }
 
 // -------------------------------------------------------------
-// الشاشة الرئيسية المشتركة وجلب البيانات وتصفيتها
+// الشاشة الرئيسية المشتركة
 // -------------------------------------------------------------
 class MainDashboard extends StatefulWidget {
   final Map<String, dynamic> currentUser;
@@ -432,7 +431,7 @@ class _MainDashboardState extends State<MainDashboard> {
 }
 
 // -------------------------------------------------------------
-// شاشة تسجيل حركة مالية (حل تداخل الـ Overflow وربط البنود بالخطة المؤقتة)
+// شاشة تسجيل حركة مالية (حفظ عبر GET لتفادي 302 ومساحات منفصلة)
 // -------------------------------------------------------------
 class TransactionEntryScreen extends StatefulWidget {
   final String currentUser;
@@ -465,9 +464,9 @@ class _TransactionEntryScreenState extends State<TransactionEntryScreen> {
   bool _isSaving = false;
 
   String _movementType = 'مصروف';
-  String _paymentMethod = 'بطاقة ائتمانية';
-  String? _selectedTempMapId; // الخطة المؤقتة / جهة الصرف
-  String? _selectedCategoryId; // البند التابع للخطة أو البند العام
+  String _paymentMethod = 'بطاقة مدى';
+  String? _selectedTempMapId;
+  String? _selectedCategoryId;
   String? _selectedAccountId;
   String? _selectedCardId;
 
@@ -486,7 +485,6 @@ class _TransactionEntryScreenState extends State<TransactionEntryScreen> {
     );
   }
 
-  // فلترة البنود: إذا تم اختيار جهة صرف مؤقتة تُعرض بنودها الفرعية فقط
   List<Map<String, String>> _getFilteredCategories() {
     if (_selectedTempMapId != null && _selectedTempMapId!.isNotEmpty) {
       final filteredSub = widget.tempSubCategories
@@ -525,12 +523,14 @@ class _TransactionEntryScreenState extends State<TransactionEntryScreen> {
     };
 
     try {
-      final res = await http.post(
-        Uri.parse(kBackendUrl),
-        body: json.encode({"action": "saveTransaction", "payload": payload}),
-      );
+      final uri = Uri.parse(kBackendUrl).replace(queryParameters: {
+        'action': 'saveTransaction',
+        'payload': json.encode(payload),
+      });
 
+      final res = await http.get(uri);
       final data = json.decode(res.body);
+
       if (data['ok'] == true) {
         if (!mounted) return;
         ScaffoldMessenger.of(context).showSnackBar(
@@ -651,19 +651,19 @@ class _TransactionEntryScreenState extends State<TransactionEntryScreen> {
             onChanged: (val) {
               setState(() {
                 _selectedTempMapId = val;
-                _selectedCategoryId = null; // إعادة تعيين البند ليختار من بنود الخريطة الجديدة
+                _selectedCategoryId = null;
               });
             },
           ),
           const SizedBox(height: 12),
 
-          // البند الرئيسي (يتغير ديناميكياً بحسب الخريطة المختارة)
+          // البند التابع
           DropdownButtonFormField<String>(
             value: _selectedCategoryId,
             dropdownColor: Colors.white,
             style: const TextStyle(color: Colors.black87, fontSize: 13),
             decoration: _fieldStyle(_selectedTempMapId != null ? 'البند التابع للخطة المؤقتة' : 'البند الرئيسي'),
-            hint: Text(_selectedTempMapId != null ? 'اختر البند التابع لهذه الخريطة...' : 'اختر البند الرئيسي...', style: const TextStyle(color: Colors.black54, fontSize: 12)),
+            hint: Text(_selectedTempMapId != null ? 'اختر البند التابع للخطة...' : 'اختر البند الرئيسي...', style: const TextStyle(color: Colors.black54, fontSize: 12)),
             items: currentCategories.map((cat) {
               return DropdownMenuItem<String>(
                 value: cat['id'],
@@ -674,7 +674,7 @@ class _TransactionEntryScreenState extends State<TransactionEntryScreen> {
           ),
           const SizedBox(height: 12),
 
-          // الحساب البنكي في سطر مستقل لمنع الـ Overflow نهائياً
+          // الحساب البنكي بسطر مستقل
           DropdownButtonFormField<String>(
             value: _selectedAccountId,
             dropdownColor: Colors.white,
@@ -691,7 +691,7 @@ class _TransactionEntryScreenState extends State<TransactionEntryScreen> {
           ),
           const SizedBox(height: 12),
 
-          // البطاقة المستخدمة في سطر مستقل لمنع الـ Overflow نهائياً
+          // البطاقة المستخدمة بسطر مستقل
           DropdownButtonFormField<String>(
             value: _selectedCardId,
             dropdownColor: Colors.white,
@@ -802,19 +802,18 @@ class _BankTransferScreenState extends State<BankTransferScreen> {
     setState(() => _isTransferring = true);
 
     try {
-      final res = await http.post(
-        Uri.parse(kBackendUrl),
-        body: json.encode({
-          "action": "transfer",
-          "fromAccId": _fromAccountId,
-          "toAccId": _toAccountId,
-          "amount": amt,
-          "notes": _notesController.text.trim(),
-          "user": widget.currentUser
-        }),
-      );
+      final uri = Uri.parse(kBackendUrl).replace(queryParameters: {
+        'action': 'transfer',
+        'fromAccId': _fromAccountId,
+        'toAccId': _toAccountId,
+        'amount': amt.toString(),
+        'notes': _notesController.text.trim(),
+        'user': widget.currentUser,
+      });
 
+      final res = await http.get(uri);
       final data = json.decode(res.body);
+
       if (data['ok'] == true) {
         if (!mounted) return;
         ScaffoldMessenger.of(context).showSnackBar(

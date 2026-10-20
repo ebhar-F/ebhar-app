@@ -7,7 +7,7 @@ on:
 
 jobs:
   build:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-22.04
 
     steps:
       - name: Checkout repository
@@ -16,7 +16,7 @@ jobs:
       - name: Set up Java
         uses: actions/setup-java@v4
         with:
-          distribution: 'zulu'
+          distribution: 'temurin'
           java-version: '17'
 
       - name: Set up Flutter
@@ -24,24 +24,21 @@ jobs:
         with:
           channel: 'stable'
 
-      - name: Setup Android Project Files
+      - name: Generate Android Project
         run: |
-          mkdir temp_app
-          cd temp_app
-          flutter create --platforms=android .
-          cp -r android ..
-          cd ..
-          rm -rf temp_app
+          flutter create --org com.ebhar.app --project-name ebhar_app .
+          sed -i 's/minSdkVersion flutter.minSdkVersion/minSdkVersion 23/g' android/app/build.gradle || true
+          sed -i 's/minSdk = flutter.minSdkVersion/minSdk = 23/g' android/app/build.gradle || true
           sed -i '/<application/i <uses-permission android:name="android.permission.USE_BIOMETRIC"\/>' android/app/src/main/AndroidManifest.xml
 
-      - name: Get dependencies
+      - name: Get packages
         run: flutter pub get
 
       - name: Build APK
-        run: flutter build apk --release
+        run: flutter build apk --debug
 
-      - name: Upload APK
+      - name: Upload Artifact
         uses: actions/upload-artifact@v4
         with:
-          name: ebhar-app-release
-          path: build/app/outputs/flutter-apk/app-release.apk
+          name: ebhar-app-debug
+          path: build/app/outputs/flutter-apk/app-debug.apk

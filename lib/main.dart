@@ -1,8 +1,13 @@
+import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:local_auth/local_auth.dart';
 import 'package:intl/intl.dart';
+import 'package:http/http.dart' as http;
+
+// الرابط البرمجي لمنظومة إبحار
+const String kBackendUrl = 'https://script.google.com/macros/s/AKfycby6jmx9r5SYs1b4NdwCHSHmB9ctqkLh5AgQjv5DIJlJugj05D92maiRpIsoRN3dr_5yRw/exec';
 
 void main() {
   WidgetsFlutterBinding.ensureInitialized();
@@ -52,7 +57,7 @@ class LoginScreen extends StatefulWidget {
 
 class _LoginScreenState extends State<LoginScreen> {
   final LocalAuthentication _auth = LocalAuthentication();
-  final TextEditingController _userController = TextEditingController();
+  final TextEditingController _userController = TextEditingController(text: 'admin');
   final TextEditingController _passwordController = TextEditingController();
   bool _rememberMe = true;
   bool _showPasswordFields = false;
@@ -61,26 +66,26 @@ class _LoginScreenState extends State<LoginScreen> {
   @override
   void initState() {
     super.initState();
-    Future.delayed(const Duration(milliseconds: 500), () {
+    Future.delayed(const Duration(milliseconds: 600), () {
       _authenticate();
     });
   }
 
   Future<void> _authenticate() async {
     try {
-      final bool canAuthenticateWithBiometrics = await _auth.canCheckBiometrics;
-      final bool canAuthenticate = canAuthenticateWithBiometrics || await _auth.isDeviceSupported();
+      final bool canCheck = await _auth.canCheckBiometrics;
+      final bool isSupported = await _auth.isDeviceSupported();
 
-      if (!canAuthenticate) {
+      if (!canCheck && !isSupported) {
         setState(() {
-          _authStatus = 'البصمة غير متوفرة أو غير مفعلة على هذا الهاتف';
+          _authStatus = 'مستشعر البصمة غير متوفر، استخدم اسم المستخدم';
           _showPasswordFields = true;
         });
         return;
       }
 
-      final bool didAuthenticate = await _auth.authenticate(
-        localizedReason: 'يرجى لمس مستشعر البصمة للمتابعة لتطبيق إبحار',
+      final bool didAuth = await _auth.authenticate(
+        localizedReason: 'المس مستشعر البصمة للمتابعة لتطبيق إبحار',
         options: const AuthenticationOptions(
           biometricOnly: false,
           stickyAuth: true,
@@ -88,23 +93,18 @@ class _LoginScreenState extends State<LoginScreen> {
         ),
       );
 
-      if (didAuthenticate && mounted) {
-        _goToHome();
+      if (didAuth && mounted) {
+        _goToDashboard();
       }
-    } on PlatformException catch (e) {
-      setState(() {
-        _authStatus = 'خطأ البصمة: ${e.message ?? e.code}';
-        _showPasswordFields = true;
-      });
     } catch (e) {
       setState(() {
-        _authStatus = 'تعذر تشغيل مستشعر البصمة';
+        _authStatus = 'يرجى تسجيل الدخول يدوياً';
         _showPasswordFields = true;
       });
     }
   }
 
-  void _goToHome() {
+  void _goToDashboard() {
     Navigator.of(context).pushReplacement(
       MaterialPageRoute(builder: (context) => const MainDashboard()),
     );
@@ -155,30 +155,19 @@ class _LoginScreenState extends State<LoginScreen> {
                 ),
                 const SizedBox(height: 12),
                 const Text(
-                  'المس مستشعر البصمة للمتابعة السريعة',
+                  'المس مستشعر البصمة للمتابعة الفورية',
                   style: TextStyle(fontSize: 14, color: Colors.white70),
                 ),
 
                 if (_authStatus.isNotEmpty) ...[
                   const SizedBox(height: 10),
-                  Text(
-                    _authStatus,
-                    textAlign: TextAlign.center,
-                    style: const TextStyle(fontSize: 12, color: Colors.amberAccent),
-                  ),
+                  Text(_authStatus, style: const TextStyle(fontSize: 12, color: Colors.amberAccent)),
                 ],
 
                 const SizedBox(height: 20),
                 TextButton.icon(
-                  onPressed: () {
-                    setState(() {
-                      _showPasswordFields = !_showPasswordFields;
-                    });
-                  },
-                  icon: Icon(
-                    _showPasswordFields ? Icons.keyboard_arrow_up : Icons.keyboard_arrow_down,
-                    color: const Color(0xFF00ADB5),
-                  ),
+                  onPressed: () => setState(() => _showPasswordFields = !_showPasswordFields),
+                  icon: Icon(_showPasswordFields ? Icons.keyboard_arrow_up : Icons.keyboard_arrow_down, color: const Color(0xFF00ADB5)),
                   label: Text(
                     _showPasswordFields ? 'إخفاء الدخول اليدوي' : 'الدخول باسم المستخدم وكلمة المرور',
                     style: const TextStyle(color: Color(0xFF00ADB5)),
@@ -228,7 +217,7 @@ class _LoginScreenState extends State<LoginScreen> {
                         backgroundColor: const Color(0xFF00ADB5),
                         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
                       ),
-                      onPressed: _goToHome,
+                      onPressed: _goToDashboard,
                       child: const Text('تسجيل الدخول', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Colors.white)),
                     ),
                   ),
@@ -243,7 +232,7 @@ class _LoginScreenState extends State<LoginScreen> {
 }
 
 // -------------------------------------------------------------
-// الشاشة الرئيسية
+// الشاشة الرئيسية المشتركة وإدارة البيانات
 // -------------------------------------------------------------
 class MainDashboard extends StatefulWidget {
   const MainDashboard({super.key});
@@ -254,11 +243,43 @@ class MainDashboard extends StatefulWidget {
 
 class _MainDashboardState extends State<MainDashboard> {
   int _currentIndex = 0;
+  bool _isLoading = true;
 
-  final List<Widget> _screens = const [
-    TransactionEntryScreen(),
-    BankTransferScreen(),
-  ];
+  List<dynamic> _accounts = [];
+  List<dynamic> _cards = [];
+  List<dynamic> _categories = [];
+  List<dynamic> _tempMaps = [];
+
+  @override
+  void initState() {
+    super.initState();
+    _fetchSystemData();
+  }
+
+  Future<void> _fetchSystemData() async {
+    setState(() => _isLoading = true);
+    try {
+      final res = await http.get(Uri.parse('$kBackendUrl?action=getInitialData'));
+      if (res.statusCode == 200) {
+        final data = json.decode(res.body);
+        if (data['ok'] == true && data['data'] != null) {
+          setState(() {
+            _accounts = data['data']['accounts'] ?? [];
+            _cards = data['data']['cards'] ?? [];
+            _categories = data['data']['categories'] ?? [];
+            _tempMaps = data['data']['tempMaps'] ?? [];
+            _isLoading = false;
+          });
+          return;
+        }
+      }
+    } catch (_) {}
+
+    // خطة احتياطية في حال تعذر الاتصال
+    setState(() {
+      _isLoading = false;
+    });
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -270,6 +291,11 @@ class _MainDashboardState extends State<MainDashboard> {
         elevation: 0,
         actions: [
           IconButton(
+            icon: const Icon(Icons.refresh),
+            tooltip: 'تحديث البيانات من الشيت',
+            onPressed: _fetchSystemData,
+          ),
+          IconButton(
             icon: const Icon(Icons.logout),
             tooltip: 'خروج',
             onPressed: () {
@@ -280,7 +306,33 @@ class _MainDashboardState extends State<MainDashboard> {
           ),
         ],
       ),
-      body: _screens[_currentIndex],
+      body: _isLoading
+          ? const Center(
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  CircularProgressIndicator(color: Color(0xFF00ADB5)),
+                  SizedBox(height: 16),
+                  Text('جاري جلب البنود والحسابات من إبحار...', style: TextStyle(color: Colors.white70)),
+                ],
+              ),
+            )
+          : IndexedStack(
+              index: _currentIndex,
+              children: [
+                TransactionEntryScreen(
+                  accounts: _accounts,
+                  cards: _cards,
+                  categories: _categories,
+                  tempMaps: _tempMaps,
+                  onSuccess: _fetchSystemData,
+                ),
+                BankTransferScreen(
+                  accounts: _accounts,
+                  onSuccess: _fetchSystemData,
+                ),
+              ],
+            ),
       bottomNavigationBar: BottomNavigationBar(
         currentIndex: _currentIndex,
         onTap: (index) => setState(() => _currentIndex = index),
@@ -297,10 +349,23 @@ class _MainDashboardState extends State<MainDashboard> {
 }
 
 // -------------------------------------------------------------
-// شاشة تسجيل حركة مالية جديدة (مطابقة تماماً للصورة)
+// شاشة تسجيل حركة مالية جديدة (متصلة بالشيت بالكامل)
 // -------------------------------------------------------------
 class TransactionEntryScreen extends StatefulWidget {
-  const TransactionEntryScreen({super.key});
+  final List<dynamic> accounts;
+  final List<dynamic> cards;
+  final List<dynamic> categories;
+  final List<dynamic> tempMaps;
+  final VoidCallback onSuccess;
+
+  const TransactionEntryScreen({
+    super.key,
+    required this.accounts,
+    required this.cards,
+    required this.categories,
+    required this.tempMaps,
+    required this.onSuccess,
+  });
 
   @override
   State<TransactionEntryScreen> createState() => _TransactionEntryScreenState();
@@ -310,25 +375,17 @@ class _TransactionEntryScreenState extends State<TransactionEntryScreen> {
   final _amountController = TextEditingController();
   final _notesController = TextEditingController();
   DateTime _selectedDate = DateTime.now();
+  bool _isSaving = false;
 
   String _movementType = 'مصروف';
   String _paymentMethod = 'بطاقة مدى';
-  String _spendingSide = 'خريطة الصرف الرئيسية';
-  String _mainItem = 'فضل';
-  String _bankAccount = 'مصرف الراجحي';
-  String _cardUsed = 'بدون بطاقة (أو حوالة مباشرة)...';
+  String? _selectedTempMapId;
+  String? _selectedCategoryId;
+  String? _selectedAccountId;
+  String? _selectedCardId;
 
-  final List<String> _movementTypes = ['مصروف', 'إيراد'];
-  final List<String> _paymentMethods = ['بطاقة مدى', 'تحويل بنكي', 'نقدي (كاش)', 'فيزا / ماستركارد'];
-  final List<String> _spendingSides = ['خريطة الصرف الرئيسية', 'مصروفات تشغيلية', 'مصروفات رأسمالية', 'إدارية وعمومية'];
-  final List<String> _mainItems = ['فضل', 'بضائع ومخزون', 'رواتب وأجور', 'إيجارات ومقر', 'نثريات وفواتير'];
-  final List<String> _bankAccounts = ['اختر الحساب...', 'مصرف الراجحي', 'البنك الأهلي', 'الإنماء', 'الخزينة النقدية'];
-  final List<String> _cardsUsed = [
-    'بدون بطاقة (أو حوالة مباشرة)...',
-    'بطاقة مدى - الراجحي (...4120)',
-    'بطاقة مدى - الأهلي (...9051)',
-    'بطاقة ائتمانية (...3310)'
-  ];
+  final List<String> _movementTypes = ['مصروف', 'دخل'];
+  final List<String> _paymentMethods = ['بطاقة مدى', 'حوالة بنكية', 'نقدي (كاش)', 'بطاقة ائتمانية'];
 
   InputDecoration _fieldStyle(String label) {
     return InputDecoration(
@@ -342,23 +399,59 @@ class _TransactionEntryScreenState extends State<TransactionEntryScreen> {
     );
   }
 
-  void _submitData() {
-    if (_amountController.text.isEmpty) {
+  Future<void> _submitData() async {
+    final amt = double.tryParse(_amountController.text);
+    if (amt == null || amt <= 0) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('يرجى إدخال المبلغ أولاً')),
+        const SnackBar(content: Text('يرجى إدخال مبلغ صحيح')),
       );
       return;
     }
 
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        backgroundColor: Colors.teal,
-        content: Text('تم تسجيل ${_movementType} بمبلغ ${_amountController.text} ر.س بنجاح'),
-      ),
-    );
+    setState(() => _isSaving = true);
 
-    _amountController.clear();
-    _notesController.clear();
+    final payload = {
+      "date": DateFormat('yyyy-MM-dd').format(_selectedDate),
+      "amount": amt,
+      "type": _movementType,
+      "payment_method": _paymentMethod,
+      "account_id": _selectedAccountId ?? "",
+      "card_id": _selectedCardId ?? "",
+      "description": _notesController.text.trim(),
+      "category_id": _selectedCategoryId ?? "",
+      "temp_map_id": _selectedTempMapId ?? "",
+      "user": "admin"
+    };
+
+    try {
+      final res = await http.post(
+        Uri.parse(kBackendUrl),
+        body: json.encode({"action": "saveTransaction", "payload": payload}),
+      );
+
+      final data = json.decode(res.body);
+      if (data['ok'] == true) {
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            backgroundColor: Colors.teal,
+            content: Text('تم حفظ الحركة وتحديث الرصيد في إبحار بنجاح!'),
+          ),
+        );
+        _amountController.clear();
+        _notesController.clear();
+        widget.onSuccess();
+      } else {
+        throw Exception(data['error'] ?? 'خطأ أثناء الحفظ');
+      }
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(backgroundColor: Colors.redAccent, content: Text('فشل الحفظ: $e')),
+      );
+    } finally {
+      if (mounted) setState(() => _isSaving = false);
+    }
   }
 
   @override
@@ -433,42 +526,69 @@ class _TransactionEntryScreenState extends State<TransactionEntryScreen> {
           ),
           const SizedBox(height: 12),
 
-          // 3. جهة الصرف
+          // 3. جهة الصرف (ديناميكية من TempMaps أو ثوابت)
           DropdownButtonFormField<String>(
-            value: _spendingSide,
-            decoration: _fieldStyle('جهة الصرف'),
-            items: _spendingSides.map((s) => DropdownMenuItem(value: s, child: Text(s, style: const TextStyle(fontSize: 13)))).toList(),
-            onChanged: (val) => setState(() => _spendingSide = val!),
+            value: _selectedTempMapId,
+            decoration: _fieldStyle('جهة الصرف / الخريطة'),
+            hint: const Text('خريطة الصرف الرئيسية', style: TextStyle(fontSize: 13, color: Colors.white54)),
+            items: widget.tempMaps.map((map) {
+              return DropdownMenuItem<String>(
+                value: map['id']?.toString(),
+                child: Text(map['name']?.toString() ?? '', style: const TextStyle(fontSize: 13)),
+              );
+            }).toList(),
+            onChanged: (val) => setState(() => _selectedTempMapId = val),
           ),
           const SizedBox(height: 12),
 
-          // 4. البند الرئيسي
+          // 4. البند الرئيسي (ديناميكي من Categories)
           DropdownButtonFormField<String>(
-            value: _mainItem,
+            value: _selectedCategoryId,
             decoration: _fieldStyle('البند الرئيسي'),
-            items: _mainItems.map((b) => DropdownMenuItem(value: b, child: Text(b, style: const TextStyle(fontSize: 13)))).toList(),
-            onChanged: (val) => setState(() => _mainItem = val!),
+            hint: const Text('اختر البند...', style: TextStyle(fontSize: 13, color: Colors.white54)),
+            items: widget.categories.map((cat) {
+              return DropdownMenuItem<String>(
+                value: cat['id']?.toString(),
+                child: Text(cat['name']?.toString() ?? '', style: const TextStyle(fontSize: 13)),
+              );
+            }).toList(),
+            onChanged: (val) => setState(() => _selectedCategoryId = val),
           ),
           const SizedBox(height: 12),
 
-          // 5. الحساب البنكي والبطاقة المستخدمة
+          // 5. الحساب البنكي والبطاقة المستخدمة (ديناميكية من Accounts و Cards)
           Row(
             children: [
               Expanded(
                 child: DropdownButtonFormField<String>(
-                  value: _bankAccount,
+                  value: _selectedAccountId,
                   decoration: _fieldStyle('الحساب البنكي'),
-                  items: _bankAccounts.map((a) => DropdownMenuItem(value: a, child: Text(a, style: const TextStyle(fontSize: 12)))).toList(),
-                  onChanged: (val) => setState(() => _bankAccount = val!),
+                  hint: const Text('اختر الحساب...', style: TextStyle(fontSize: 12, color: Colors.white54)),
+                  items: widget.accounts.map((acc) {
+                    return DropdownMenuItem<String>(
+                      value: acc['id']?.toString(),
+                      child: Text(acc['name']?.toString() ?? '', style: const TextStyle(fontSize: 12)),
+                    );
+                  }).toList(),
+                  onChanged: (val) => setState(() => _selectedAccountId = val),
                 ),
               ),
               const SizedBox(width: 10),
               Expanded(
                 child: DropdownButtonFormField<String>(
-                  value: _cardUsed,
+                  value: _selectedCardId,
                   decoration: _fieldStyle('البطاقة المستخدمة'),
-                  items: _cardsUsed.map((c) => DropdownMenuItem(value: c, child: Text(c, overflow: TextOverflow.ellipsis, style: const TextStyle(fontSize: 11)))).toList(),
-                  onChanged: (val) => setState(() => _cardUsed = val!),
+                  hint: const Text('بدون بطاقة...', style: TextStyle(fontSize: 11, color: Colors.white54)),
+                  items: [
+                    const DropdownMenuItem<String>(value: '', child: Text('بدون بطاقة', style: TextStyle(fontSize: 11))),
+                    ...widget.cards.map((card) {
+                      return DropdownMenuItem<String>(
+                        value: card['id']?.toString(),
+                        child: Text(card['name']?.toString() ?? '', overflow: TextOverflow.ellipsis, style: const TextStyle(fontSize: 11)),
+                      );
+                    }),
+                  ],
+                  onChanged: (val) => setState(() => _selectedCardId = val),
                 ),
               ),
             ],
@@ -485,19 +605,21 @@ class _TransactionEntryScreenState extends State<TransactionEntryScreen> {
           ),
           const SizedBox(height: 20),
 
-          // 7. زر حفظ الحركة المالية
+          // 7. زر الحفظ
           ElevatedButton.icon(
             style: ElevatedButton.styleFrom(
               backgroundColor: const Color(0xFF0F3057),
               padding: const EdgeInsets.symmetric(vertical: 14),
               shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
             ),
-            icon: const Icon(Icons.check, color: Colors.white),
-            label: const Text(
-              'حفظ الحركة المالية',
-              style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Colors.white),
+            icon: _isSaving
+                ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
+                : const Icon(Icons.check, color: Colors.white),
+            label: Text(
+              _isSaving ? 'جاري الحفظ في الشيت...' : 'حفظ الحركة المالية',
+              style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Colors.white),
             ),
-            onPressed: _submitData,
+            onPressed: _isSaving ? null : _submitData,
           ),
         ],
       ),
@@ -506,10 +628,17 @@ class _TransactionEntryScreenState extends State<TransactionEntryScreen> {
 }
 
 // -------------------------------------------------------------
-// شاشة التحويل بين الحسابات
+// شاشة التحويل بين الحسابات البنكية (متصلة بالشيت)
 // -------------------------------------------------------------
 class BankTransferScreen extends StatefulWidget {
-  const BankTransferScreen({super.key});
+  final List<dynamic> accounts;
+  final VoidCallback onSuccess;
+
+  const BankTransferScreen({
+    super.key,
+    required this.accounts,
+    required this.onSuccess,
+  });
 
   @override
   State<BankTransferScreen> createState() => _BankTransferScreenState();
@@ -518,35 +647,71 @@ class BankTransferScreen extends StatefulWidget {
 class _BankTransferScreenState extends State<BankTransferScreen> {
   final _amountController = TextEditingController();
   final _notesController = TextEditingController();
-  String _fromAccount = 'مصرف الراجحي';
-  String _toAccount = 'البنك الأهلي';
+  String? _fromAccountId;
+  String? _toAccountId;
+  bool _isTransferring = false;
 
-  final List<String> _accounts = ['مصرف الراجحي', 'البنك الأهلي', 'الإنماء', 'الخزينة النقدية'];
-
-  void _submitTransfer() {
-    if (_amountController.text.isEmpty) {
+  Future<void> _submitTransfer() async {
+    final amt = double.tryParse(_amountController.text);
+    if (amt == null || amt <= 0) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('يرجى تحديد المبلغ')),
+        const SnackBar(content: Text('يرجى تحديد مبلغ تحويل صحيح')),
       );
       return;
     }
 
-    if (_fromAccount == _toAccount) {
+    if (_fromAccountId == null || _toAccountId == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('يرجى اختيار الحساب المصدر والحساب الهدف')),
+      );
+      return;
+    }
+
+    if (_fromAccountId == _toAccountId) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('لا يمكن التحويل لنفس الحساب')),
       );
       return;
     }
 
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        backgroundColor: Colors.teal,
-        content: Text('تم تحويل ${_amountController.text} ر.س من $_fromAccount إلى $_toAccount'),
-      ),
-    );
+    setState(() => _isTransferring = true);
 
-    _amountController.clear();
-    _notesController.clear();
+    try {
+      final res = await http.post(
+        Uri.parse(kBackendUrl),
+        body: json.encode({
+          "action": "transfer",
+          "fromAccId": _fromAccountId,
+          "toAccId": _toAccountId,
+          "amount": amt,
+          "notes": _notesController.text.trim(),
+          "user": "admin"
+        }),
+      );
+
+      final data = json.decode(res.body);
+      if (data['ok'] == true) {
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            backgroundColor: Colors.teal,
+            content: Text('تم تنفيذ التحويل البنكي وتحديث الأرصدة بنجاح!'),
+          ),
+        );
+        _amountController.clear();
+        _notesController.clear();
+        widget.onSuccess();
+      } else {
+        throw Exception(data['error'] ?? 'خطأ أثناء التحويل');
+      }
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(backgroundColor: Colors.redAccent, content: Text('فشل التحويل: $e')),
+      );
+    } finally {
+      if (mounted) setState(() => _isTransferring = false);
+    }
   }
 
   @override
@@ -557,19 +722,31 @@ class _BankTransferScreenState extends State<BankTransferScreen> {
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
           DropdownButtonFormField<String>(
-            value: _fromAccount,
+            value: _fromAccountId,
             decoration: const InputDecoration(labelText: 'من حساب', filled: true, fillColor: Color(0xFF14243B)),
-            items: _accounts.map((acc) => DropdownMenuItem(value: acc, child: Text(acc))).toList(),
-            onChanged: (val) => setState(() => _fromAccount = val!),
+            hint: const Text('اختر حساب المصدر...'),
+            items: widget.accounts.map((acc) {
+              return DropdownMenuItem<String>(
+                value: acc['id']?.toString(),
+                child: Text(acc['name']?.toString() ?? ''),
+              );
+            }).toList(),
+            onChanged: (val) => setState(() => _fromAccountId = val),
           ),
           const SizedBox(height: 12),
           const Center(child: Icon(Icons.arrow_downward, color: Color(0xFF00ADB5))),
           const SizedBox(height: 12),
           DropdownButtonFormField<String>(
-            value: _toAccount,
+            value: _toAccountId,
             decoration: const InputDecoration(labelText: 'إلى حساب', filled: true, fillColor: Color(0xFF14243B)),
-            items: _accounts.map((acc) => DropdownMenuItem(value: acc, child: Text(acc))).toList(),
-            onChanged: (val) => setState(() => _toAccount = val!),
+            hint: const Text('اختر الحساب المحول إليه...'),
+            items: widget.accounts.map((acc) {
+              return DropdownMenuItem<String>(
+                value: acc['id']?.toString(),
+                child: Text(acc['name']?.toString() ?? ''),
+              );
+            }).toList(),
+            onChanged: (val) => setState(() => _toAccountId = val),
           ),
           const SizedBox(height: 14),
           TextField(
@@ -580,7 +757,7 @@ class _BankTransferScreenState extends State<BankTransferScreen> {
           const SizedBox(height: 14),
           TextField(
             controller: _notesController,
-            decoration: const InputDecoration(labelText: 'البيان / ملاحظات التحويل', filled: true, fillColor: Color(0xFF14243B)),
+            decoration: const InputDecoration(labelText: 'البيان / سبب التحويل', filled: true, fillColor: Color(0xFF14243B)),
           ),
           const SizedBox(height: 20),
           ElevatedButton.icon(
@@ -589,9 +766,14 @@ class _BankTransferScreenState extends State<BankTransferScreen> {
               padding: const EdgeInsets.symmetric(vertical: 14),
               shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
             ),
-            icon: const Icon(Icons.check, color: Colors.white),
-            label: const Text('تأكيد التحويل البنكي', style: TextStyle(fontWeight: FontWeight.bold, color: Colors.white)),
-            onPressed: _submitTransfer,
+            icon: _isTransferring
+                ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
+                : const Icon(Icons.check, color: Colors.white),
+            label: Text(
+              _isTransferring ? 'جاري التحويل...' : 'تأكيد التحويل البنكي',
+              style: const TextStyle(fontWeight: FontWeight.bold, color: Colors.white),
+            ),
+            onPressed: _isTransferring ? null : _submitTransfer,
           ),
         ],
       ),

@@ -76,6 +76,7 @@ class _AuthGatekeeperState extends State<AuthGatekeeper> {
     if (!mounted) return;
 
     if (bioEnabled && savedUser != null && savedPass != null) {
+      // توجيه تلقائي لشاشة البصمة السريعة
       Navigator.of(context).pushReplacement(
         MaterialPageRoute(
           builder: (context) => BiometricPromptScreen(
@@ -85,6 +86,7 @@ class _AuthGatekeeperState extends State<AuthGatekeeper> {
         ),
       );
     } else {
+      // توجيه إلزامي لإدخال اسم المستخدم وكلمة المرور
       Navigator.of(context).pushReplacement(
         MaterialPageRoute(builder: (context) => const FullLoginScreen()),
       );
@@ -102,7 +104,7 @@ class _AuthGatekeeperState extends State<AuthGatekeeper> {
 }
 
 // -------------------------------------------------------------
-// شاشة تسجيل الدخول الأولى
+// شاشة تسجيل الدخول الأولى (إلزامية مع تفعيل البصمة الدائمة)
 // -------------------------------------------------------------
 class FullLoginScreen extends StatefulWidget {
   const FullLoginScreen({super.key});
@@ -269,7 +271,7 @@ class _FullLoginScreenState extends State<FullLoginScreen> {
 }
 
 // -------------------------------------------------------------
-// شاشة الدخول السريع بالبصمة
+// شاشة الدخول السريع بالبصمة في الفتحات اللاحقة
 // -------------------------------------------------------------
 class BiometricPromptScreen extends StatefulWidget {
   final String username;
@@ -330,6 +332,7 @@ class _BiometricPromptScreenState extends State<BiometricPromptScreen> {
         _resetToManualLogin();
       }
     } catch (_) {
+      // السماح بالدخول في حال عدم توفر شبكة مؤقتاً
       if (!mounted) return;
       Navigator.of(context).pushReplacement(
         MaterialPageRoute(
@@ -790,6 +793,7 @@ class _TransactionEntryScreenState extends State<TransactionEntryScreen> {
           ),
           const SizedBox(height: 12),
 
+          // جهة الصرف
           DropdownButtonFormField<String?>(
             value: _selectedTempMapId,
             dropdownColor: Colors.white,
@@ -817,6 +821,7 @@ class _TransactionEntryScreenState extends State<TransactionEntryScreen> {
           ),
           const SizedBox(height: 12),
 
+          // البند التابع
           DropdownButtonFormField<String>(
             value: _selectedCategoryId,
             dropdownColor: Colors.white,
@@ -833,6 +838,7 @@ class _TransactionEntryScreenState extends State<TransactionEntryScreen> {
           ),
           const SizedBox(height: 12),
 
+          // الحساب البنكي
           DropdownButtonFormField<String>(
             value: _selectedAccountId,
             dropdownColor: Colors.white,
@@ -849,6 +855,7 @@ class _TransactionEntryScreenState extends State<TransactionEntryScreen> {
           ),
           const SizedBox(height: 12),
 
+          // البطاقة المستخدمة
           DropdownButtonFormField<String>(
             value: _selectedCardId,
             dropdownColor: Colors.white,

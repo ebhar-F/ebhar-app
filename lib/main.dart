@@ -6,7 +6,6 @@ import 'package:local_auth/local_auth.dart';
 import 'package:intl/intl.dart';
 import 'package:http/http.dart' as http;
 
-// الرابط البرمجي لمنظومة إبحار
 const String kBackendUrl = 'https://script.google.com/macros/s/AKfycby6jmx9r5SYs1b4NdwCHSHmB9ctqkLh5AgQjv5DIJlJugj05D92maiRpIsoRN3dr_5yRw/exec';
 
 void main() {
@@ -46,7 +45,7 @@ class EbharApp extends StatelessWidget {
 }
 
 // -------------------------------------------------------------
-// شاشة تسجيل الدخول
+// شاشة تسجيل الدخول السريع عبر البصمة
 // -------------------------------------------------------------
 class LoginScreen extends StatefulWidget {
   const LoginScreen({super.key});
@@ -66,7 +65,7 @@ class _LoginScreenState extends State<LoginScreen> {
   @override
   void initState() {
     super.initState();
-    Future.delayed(const Duration(milliseconds: 600), () {
+    Future.delayed(const Duration(milliseconds: 500), () {
       _authenticate();
     });
   }
@@ -78,14 +77,14 @@ class _LoginScreenState extends State<LoginScreen> {
 
       if (!canCheck && !isSupported) {
         setState(() {
-          _authStatus = 'مستشعر البصمة غير متوفر، استخدم اسم المستخدم';
+          _authStatus = 'مستشعر البصمة غير مفعل على الهاتف';
           _showPasswordFields = true;
         });
         return;
       }
 
       final bool didAuth = await _auth.authenticate(
-        localizedReason: 'المس مستشعر البصمة للمتابعة لتطبيق إبحار',
+        localizedReason: 'المس مستشعر البصمة للدخول لتطبيق إبحار',
         options: const AuthenticationOptions(
           biometricOnly: false,
           stickyAuth: true,
@@ -96,11 +95,8 @@ class _LoginScreenState extends State<LoginScreen> {
       if (didAuth && mounted) {
         _goToDashboard();
       }
-    } catch (e) {
-      setState(() {
-        _authStatus = 'يرجى تسجيل الدخول يدوياً';
-        _showPasswordFields = true;
-      });
+    } catch (_) {
+      setState(() => _showPasswordFields = true);
     }
   }
 
@@ -138,7 +134,7 @@ class _LoginScreenState extends State<LoginScreen> {
                   'منظومة الإدارة والمحاسبة الذكية',
                   style: TextStyle(fontSize: 14, color: Colors.white60),
                 ),
-                const SizedBox(height: 32),
+                const SizedBox(height: 36),
 
                 InkWell(
                   onTap: _authenticate,
@@ -154,28 +150,22 @@ class _LoginScreenState extends State<LoginScreen> {
                   ),
                 ),
                 const SizedBox(height: 12),
-                const Text(
-                  'المس مستشعر البصمة للمتابعة الفورية',
-                  style: TextStyle(fontSize: 14, color: Colors.white70),
-                ),
+                const Text('المس مستشعر البصمة للمتابعة الفورية', style: TextStyle(fontSize: 14, color: Colors.white70)),
 
                 if (_authStatus.isNotEmpty) ...[
                   const SizedBox(height: 10),
                   Text(_authStatus, style: const TextStyle(fontSize: 12, color: Colors.amberAccent)),
                 ],
 
-                const SizedBox(height: 20),
+                const SizedBox(height: 24),
                 TextButton.icon(
                   onPressed: () => setState(() => _showPasswordFields = !_showPasswordFields),
                   icon: Icon(_showPasswordFields ? Icons.keyboard_arrow_up : Icons.keyboard_arrow_down, color: const Color(0xFF00ADB5)),
-                  label: Text(
-                    _showPasswordFields ? 'إخفاء الدخول اليدوي' : 'الدخول باسم المستخدم وكلمة المرور',
-                    style: const TextStyle(color: Color(0xFF00ADB5)),
-                  ),
+                  label: Text(_showPasswordFields ? 'إخفاء الدخول اليدوي' : 'الدخول باسم المستخدم وكلمة المرور', style: const TextStyle(color: Color(0xFF00ADB5))),
                 ),
 
                 if (_showPasswordFields) ...[
-                  const SizedBox(height: 14),
+                  const SizedBox(height: 12),
                   TextField(
                     controller: _userController,
                     decoration: InputDecoration(
@@ -232,7 +222,7 @@ class _LoginScreenState extends State<LoginScreen> {
 }
 
 // -------------------------------------------------------------
-// الشاشة الرئيسية المشتركة وإدارة البيانات
+// الشاشة الرئيسية وجلب البيانات الديناميكية
 // -------------------------------------------------------------
 class MainDashboard extends StatefulWidget {
   const MainDashboard({super.key});
@@ -245,15 +235,27 @@ class _MainDashboardState extends State<MainDashboard> {
   int _currentIndex = 0;
   bool _isLoading = true;
 
-  List<dynamic> _accounts = [];
-  List<dynamic> _cards = [];
-  List<dynamic> _categories = [];
-  List<dynamic> _tempMaps = [];
+  List<Map<String, String>> _accountsList = [];
+  List<Map<String, String>> _cardsList = [];
+  List<Map<String, String>> _categoriesList = [];
+  List<Map<String, String>> _tempMapsList = [];
 
   @override
   void initState() {
     super.initState();
     _fetchSystemData();
+  }
+
+  // استخراج الاسم البرمجي بدقة من أي كائن راجع من الشيت
+  String _extractName(dynamic obj) {
+    if (obj is! Map) return obj.toString();
+    return (obj['name'] ?? obj['bank_name'] ?? obj['account_name'] ?? obj['title'] ?? obj['الاسم'] ?? obj['اسم الحساب'] ?? '').toString();
+  }
+
+  String _extractId(dynamic obj, int fallbackIndex) {
+    if (obj is! Map) return 'id_$fallbackIndex';
+    final id = obj['id'] ?? obj['account_id'] ?? obj['card_id'] ?? obj['category_id'] ?? obj['رقم الحساب'];
+    return (id != null && id.toString().isNotEmpty) ? id.toString() : 'id_$fallbackIndex';
   }
 
   Future<void> _fetchSystemData() async {
@@ -263,11 +265,48 @@ class _MainDashboardState extends State<MainDashboard> {
       if (res.statusCode == 200) {
         final data = json.decode(res.body);
         if (data['ok'] == true && data['data'] != null) {
+          final rawAccounts = (data['data']['accounts'] as List?) ?? [];
+          final rawCards = (data['data']['cards'] as List?) ?? [];
+          final rawCategories = (data['data']['categories'] as List?) ?? [];
+          final rawTempMaps = (data['data']['tempMaps'] as List?) ?? [];
+
+          final parsedAccounts = <Map<String, String>>[];
+          for (int i = 0; i < rawAccounts.length; i++) {
+            final name = _extractName(rawAccounts[i]);
+            if (name.isNotEmpty) {
+              parsedAccounts.add({'id': _extractId(rawAccounts[i], i), 'name': name});
+            }
+          }
+
+          final parsedCards = <Map<String, String>>[];
+          for (int i = 0; i < rawCards.length; i++) {
+            final name = _extractName(rawCards[i]);
+            if (name.isNotEmpty) {
+              parsedCards.add({'id': _extractId(rawCards[i], i), 'name': name});
+            }
+          }
+
+          final parsedCategories = <Map<String, String>>[];
+          for (int i = 0; i < rawCategories.length; i++) {
+            final name = _extractName(rawCategories[i]);
+            if (name.isNotEmpty) {
+              parsedCategories.add({'id': _extractId(rawCategories[i], i), 'name': name});
+            }
+          }
+
+          final parsedTempMaps = <Map<String, String>>[];
+          for (int i = 0; i < rawTempMaps.length; i++) {
+            final name = _extractName(rawTempMaps[i]);
+            if (name.isNotEmpty) {
+              parsedTempMaps.add({'id': _extractId(rawTempMaps[i], i), 'name': name});
+            }
+          }
+
           setState(() {
-            _accounts = data['data']['accounts'] ?? [];
-            _cards = data['data']['cards'] ?? [];
-            _categories = data['data']['categories'] ?? [];
-            _tempMaps = data['data']['tempMaps'] ?? [];
+            _accountsList = parsedAccounts;
+            _cardsList = parsedCards;
+            _categoriesList = parsedCategories;
+            _tempMapsList = parsedTempMaps;
             _isLoading = false;
           });
           return;
@@ -275,8 +314,16 @@ class _MainDashboardState extends State<MainDashboard> {
       }
     } catch (_) {}
 
-    // خطة احتياطية في حال تعذر الاتصال
+    // في حال عدم توفر الاتصال أو كانت فارغة نضع الحسابات الأساسية كاحتياط
     setState(() {
+      if (_accountsList.isEmpty) {
+        _accountsList = [
+          {'id': 'acc_1', 'name': 'مصرف الراجحي'},
+          {'id': 'acc_2', 'name': 'البنك الأهلي'},
+          {'id': 'acc_3', 'name': 'بنك الإنماء'},
+          {'id': 'acc_4', 'name': 'الخزينة النقدية'},
+        ];
+      }
       _isLoading = false;
     });
   }
@@ -292,7 +339,7 @@ class _MainDashboardState extends State<MainDashboard> {
         actions: [
           IconButton(
             icon: const Icon(Icons.refresh),
-            tooltip: 'تحديث البيانات من الشيت',
+            tooltip: 'تحديث الحسابات من الشيت',
             onPressed: _fetchSystemData,
           ),
           IconButton(
@@ -313,7 +360,7 @@ class _MainDashboardState extends State<MainDashboard> {
                 children: [
                   CircularProgressIndicator(color: Color(0xFF00ADB5)),
                   SizedBox(height: 16),
-                  Text('جاري جلب البنود والحسابات من إبحار...', style: TextStyle(color: Colors.white70)),
+                  Text('جاري تحديث الحسابات والبنود من إبحار...', style: TextStyle(color: Colors.white70)),
                 ],
               ),
             )
@@ -321,14 +368,14 @@ class _MainDashboardState extends State<MainDashboard> {
               index: _currentIndex,
               children: [
                 TransactionEntryScreen(
-                  accounts: _accounts,
-                  cards: _cards,
-                  categories: _categories,
-                  tempMaps: _tempMaps,
+                  accounts: _accountsList,
+                  cards: _cardsList,
+                  categories: _categoriesList,
+                  tempMaps: _tempMapsList,
                   onSuccess: _fetchSystemData,
                 ),
                 BankTransferScreen(
-                  accounts: _accounts,
+                  accounts: _accountsList,
                   onSuccess: _fetchSystemData,
                 ),
               ],
@@ -349,13 +396,13 @@ class _MainDashboardState extends State<MainDashboard> {
 }
 
 // -------------------------------------------------------------
-// شاشة تسجيل حركة مالية جديدة (متصلة بالشيت بالكامل)
+// شاشة تسجيل حركة مالية جديدة
 // -------------------------------------------------------------
 class TransactionEntryScreen extends StatefulWidget {
-  final List<dynamic> accounts;
-  final List<dynamic> cards;
-  final List<dynamic> categories;
-  final List<dynamic> tempMaps;
+  final List<Map<String, String>> accounts;
+  final List<Map<String, String>> cards;
+  final List<Map<String, String>> categories;
+  final List<Map<String, String>> tempMaps;
   final VoidCallback onSuccess;
 
   const TransactionEntryScreen({
@@ -403,7 +450,7 @@ class _TransactionEntryScreenState extends State<TransactionEntryScreen> {
     final amt = double.tryParse(_amountController.text);
     if (amt == null || amt <= 0) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('يرجى إدخال مبلغ صحيح')),
+        const SnackBar(content: Text('يرجى كتابة المبلغ أولاً')),
       );
       return;
     }
@@ -415,7 +462,7 @@ class _TransactionEntryScreenState extends State<TransactionEntryScreen> {
       "amount": amt,
       "type": _movementType,
       "payment_method": _paymentMethod,
-      "account_id": _selectedAccountId ?? "",
+      "account_id": _selectedAccountId ?? (widget.accounts.isNotEmpty ? widget.accounts.first['id'] : ""),
       "card_id": _selectedCardId ?? "",
       "description": _notesController.text.trim(),
       "category_id": _selectedCategoryId ?? "",
@@ -433,21 +480,21 @@ class _TransactionEntryScreenState extends State<TransactionEntryScreen> {
       if (data['ok'] == true) {
         if (!mounted) return;
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
+          const SnackBar(
             backgroundColor: Colors.teal,
-            content: Text('تم حفظ الحركة وتحديث الرصيد في إبحار بنجاح!'),
+            content: Text('تم تسجيل الحركة وتحديث الرصيد في الشيت بنجاح!'),
           ),
         );
         _amountController.clear();
         _notesController.clear();
         widget.onSuccess();
       } else {
-        throw Exception(data['error'] ?? 'خطأ أثناء الحفظ');
+        throw Exception(data['error'] ?? 'تعذر الحفظ');
       }
     } catch (e) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(backgroundColor: Colors.redAccent, content: Text('فشل الحفظ: $e')),
+        SnackBar(backgroundColor: Colors.redAccent, content: Text('خطأ أثناء الحفظ: $e')),
       );
     } finally {
       if (mounted) setState(() => _isSaving = false);
@@ -461,7 +508,6 @@ class _TransactionEntryScreenState extends State<TransactionEntryScreen> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          // 1. التاريخ والمبلغ
           Row(
             children: [
               Expanded(
@@ -502,7 +548,6 @@ class _TransactionEntryScreenState extends State<TransactionEntryScreen> {
           ),
           const SizedBox(height: 12),
 
-          // 2. نوع الحركة وطريقة الدفع
           Row(
             children: [
               Expanded(
@@ -526,48 +571,48 @@ class _TransactionEntryScreenState extends State<TransactionEntryScreen> {
           ),
           const SizedBox(height: 12),
 
-          // 3. جهة الصرف (ديناميكية من TempMaps أو ثوابت)
+          // جهة الصرف
           DropdownButtonFormField<String>(
             value: _selectedTempMapId,
             decoration: _fieldStyle('جهة الصرف / الخريطة'),
-            hint: const Text('خريطة الصرف الرئيسية', style: TextStyle(fontSize: 13, color: Colors.white54)),
+            hint: const Text('خريطة الصرف الرئيسية', style: TextStyle(fontSize: 13, color: Colors.white70)),
             items: widget.tempMaps.map((map) {
               return DropdownMenuItem<String>(
-                value: map['id']?.toString(),
-                child: Text(map['name']?.toString() ?? '', style: const TextStyle(fontSize: 13)),
+                value: map['id'],
+                child: Text(map['name'] ?? '', style: const TextStyle(fontSize: 13)),
               );
             }).toList(),
             onChanged: (val) => setState(() => _selectedTempMapId = val),
           ),
           const SizedBox(height: 12),
 
-          // 4. البند الرئيسي (ديناميكي من Categories)
+          // البند الرئيسي
           DropdownButtonFormField<String>(
             value: _selectedCategoryId,
             decoration: _fieldStyle('البند الرئيسي'),
-            hint: const Text('اختر البند...', style: TextStyle(fontSize: 13, color: Colors.white54)),
+            hint: const Text('اختر البند...', style: TextStyle(fontSize: 13, color: Colors.white70)),
             items: widget.categories.map((cat) {
               return DropdownMenuItem<String>(
-                value: cat['id']?.toString(),
-                child: Text(cat['name']?.toString() ?? '', style: const TextStyle(fontSize: 13)),
+                value: cat['id'],
+                child: Text(cat['name'] ?? '', style: const TextStyle(fontSize: 13)),
               );
             }).toList(),
             onChanged: (val) => setState(() => _selectedCategoryId = val),
           ),
           const SizedBox(height: 12),
 
-          // 5. الحساب البنكي والبطاقة المستخدمة (ديناميكية من Accounts و Cards)
+          // الحساب والبطاقة
           Row(
             children: [
               Expanded(
                 child: DropdownButtonFormField<String>(
                   value: _selectedAccountId,
                   decoration: _fieldStyle('الحساب البنكي'),
-                  hint: const Text('اختر الحساب...', style: TextStyle(fontSize: 12, color: Colors.white54)),
+                  hint: const Text('اختر الحساب...', style: TextStyle(fontSize: 12, color: Colors.white70)),
                   items: widget.accounts.map((acc) {
                     return DropdownMenuItem<String>(
-                      value: acc['id']?.toString(),
-                      child: Text(acc['name']?.toString() ?? '', style: const TextStyle(fontSize: 12)),
+                      value: acc['id'],
+                      child: Text(acc['name'] ?? '', style: const TextStyle(fontSize: 12)),
                     );
                   }).toList(),
                   onChanged: (val) => setState(() => _selectedAccountId = val),
@@ -578,13 +623,13 @@ class _TransactionEntryScreenState extends State<TransactionEntryScreen> {
                 child: DropdownButtonFormField<String>(
                   value: _selectedCardId,
                   decoration: _fieldStyle('البطاقة المستخدمة'),
-                  hint: const Text('بدون بطاقة...', style: TextStyle(fontSize: 11, color: Colors.white54)),
+                  hint: const Text('بدون بطاقة...', style: TextStyle(fontSize: 11, color: Colors.white70)),
                   items: [
                     const DropdownMenuItem<String>(value: '', child: Text('بدون بطاقة', style: TextStyle(fontSize: 11))),
                     ...widget.cards.map((card) {
                       return DropdownMenuItem<String>(
-                        value: card['id']?.toString(),
-                        child: Text(card['name']?.toString() ?? '', overflow: TextOverflow.ellipsis, style: const TextStyle(fontSize: 11)),
+                        value: card['id'],
+                        child: Text(card['name'] ?? '', overflow: TextOverflow.ellipsis, style: const TextStyle(fontSize: 11)),
                       );
                     }),
                   ],
@@ -595,7 +640,6 @@ class _TransactionEntryScreenState extends State<TransactionEntryScreen> {
           ),
           const SizedBox(height: 12),
 
-          // 6. البيان / سبب الشراء
           TextField(
             controller: _notesController,
             decoration: _fieldStyle('البيان / سبب الشراء').copyWith(
@@ -605,7 +649,6 @@ class _TransactionEntryScreenState extends State<TransactionEntryScreen> {
           ),
           const SizedBox(height: 20),
 
-          // 7. زر الحفظ
           ElevatedButton.icon(
             style: ElevatedButton.styleFrom(
               backgroundColor: const Color(0xFF0F3057),
@@ -628,10 +671,10 @@ class _TransactionEntryScreenState extends State<TransactionEntryScreen> {
 }
 
 // -------------------------------------------------------------
-// شاشة التحويل بين الحسابات البنكية (متصلة بالشيت)
+// شاشة التحويل بين الحسابات البنكية
 // -------------------------------------------------------------
 class BankTransferScreen extends StatefulWidget {
-  final List<dynamic> accounts;
+  final List<Map<String, String>> accounts;
   final VoidCallback onSuccess;
 
   const BankTransferScreen({
@@ -655,14 +698,14 @@ class _BankTransferScreenState extends State<BankTransferScreen> {
     final amt = double.tryParse(_amountController.text);
     if (amt == null || amt <= 0) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('يرجى تحديد مبلغ تحويل صحيح')),
+        const SnackBar(content: Text('يرجى تحديد مبلغ التحويل')),
       );
       return;
     }
 
     if (_fromAccountId == null || _toAccountId == null) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('يرجى اختيار الحساب المصدر والحساب الهدف')),
+        const SnackBar(content: Text('يرجى اختيار الحساب المحول منه وإليه')),
       );
       return;
     }
@@ -695,19 +738,19 @@ class _BankTransferScreenState extends State<BankTransferScreen> {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
             backgroundColor: Colors.teal,
-            content: Text('تم تنفيذ التحويل البنكي وتحديث الأرصدة بنجاح!'),
+            content: Text('تم التحويل وتحديث الأرصدة في الشيت بنجاح!'),
           ),
         );
         _amountController.clear();
         _notesController.clear();
         widget.onSuccess();
       } else {
-        throw Exception(data['error'] ?? 'خطأ أثناء التحويل');
+        throw Exception(data['error'] ?? 'تعذر التحويل');
       }
     } catch (e) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(backgroundColor: Colors.redAccent, content: Text('فشل التحويل: $e')),
+        SnackBar(backgroundColor: Colors.redAccent, content: Text('خطأ أثناء التحويل: $e')),
       );
     } finally {
       if (mounted) setState(() => _isTransferring = false);
@@ -727,8 +770,8 @@ class _BankTransferScreenState extends State<BankTransferScreen> {
             hint: const Text('اختر حساب المصدر...'),
             items: widget.accounts.map((acc) {
               return DropdownMenuItem<String>(
-                value: acc['id']?.toString(),
-                child: Text(acc['name']?.toString() ?? ''),
+                value: acc['id'],
+                child: Text(acc['name'] ?? ''),
               );
             }).toList(),
             onChanged: (val) => setState(() => _fromAccountId = val),
@@ -742,8 +785,8 @@ class _BankTransferScreenState extends State<BankTransferScreen> {
             hint: const Text('اختر الحساب المحول إليه...'),
             items: widget.accounts.map((acc) {
               return DropdownMenuItem<String>(
-                value: acc['id']?.toString(),
-                child: Text(acc['name']?.toString() ?? ''),
+                value: acc['id'],
+                child: Text(acc['name'] ?? ''),
               );
             }).toList(),
             onChanged: (val) => setState(() => _toAccountId = val),

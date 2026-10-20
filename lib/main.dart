@@ -5,7 +5,6 @@ import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:local_auth/local_auth.dart';
 import 'package:intl/intl.dart';
 import 'package:http/http.dart' as http;
-import 'package:shared_preferences/shared_preferences.dart';
 
 const String kBackendUrl = 'https://script.google.com/macros/s/AKfycby6jmx9r5SYs1b4NdwCHSHmB9ctqkLh5AgQjv5DIJlJugj05D92maiRpIsoRN3dr_5yRw/exec';
 
@@ -24,8 +23,8 @@ class EbharApp extends StatelessWidget {
       debugShowCheckedModeBanner: false,
       theme: ThemeData(
         brightness: Brightness.light,
-        scaffoldBackgroundColor: const Color(0xFFF4F6F9), // خلفية فاتحة ومريحة
-        primaryColor: const Color(0xFF0F4C81), // أزرق مالي أنيق
+        scaffoldBackgroundColor: const Color(0xFFF4F6F9),
+        primaryColor: const Color(0xFF0F4C81),
         colorScheme: const ColorScheme.light(
           primary: Color(0xFF0F4C81),
           secondary: Color(0xFF007A78),
@@ -45,60 +44,13 @@ class EbharApp extends StatelessWidget {
       ],
       supportedLocales: const [Locale('ar', 'SA')],
       locale: const Locale('ar', 'SA'),
-      home: const SplashScreen(),
+      home: const FullLoginScreen(),
     );
   }
 }
 
 // -------------------------------------------------------------
-// شاشة البداية لتحديد المسار (بصمة للمسجلين مسبقاً، أو كلمة مرور للجدد)
-// -------------------------------------------------------------
-class SplashScreen extends StatefulWidget {
-  const SplashScreen({super.key});
-
-  @override
-  State<SplashScreen> createState() => _SplashScreenState();
-}
-
-class _SplashScreenState extends State<SplashScreen> {
-  @override
-  void initState() {
-    super.initState();
-    _checkSavedUser();
-  }
-
-  Future<void> _checkSavedUser() async {
-    final prefs = await SharedPreferences.getInstance();
-    final bool hasLoggedIn = prefs.getBool('has_logged_in') ?? false;
-    final String? savedUser = prefs.getString('saved_username');
-
-    if (!mounted) return;
-
-    if (hasLoggedIn && savedUser != null && savedUser.isNotEmpty) {
-      // مستخدم مسجل مسبقاً -> توجيهه لشاشة البصمة السريعة
-      Navigator.of(context).pushReplacement(
-        MaterialPageRoute(builder: (context) => BiometricFastLogin(username: savedUser)),
-      );
-    } else {
-      // تطبيق جديد أو تم تسجيل الخروج -> توجيهه لإدخال اسم المستخدم وكلمة المرور
-      Navigator.of(context).pushReplacement(
-        MaterialPageRoute(builder: (context) => const FullLoginScreen()),
-      );
-    }
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return const Scaffold(
-      body: Center(
-        child: CircularProgressIndicator(color: Color(0xFF0F4C81)),
-      ),
-    );
-  }
-}
-
-// -------------------------------------------------------------
-// 1. شاشة تسجيل الدخول الكاملة (إلزامية لأول مرة لتوزيع التطبيق)
+// شاشة تسجيل الدخول المنظمة
 // -------------------------------------------------------------
 class FullLoginScreen extends StatefulWidget {
   const FullLoginScreen({super.key});
@@ -108,63 +60,49 @@ class FullLoginScreen extends StatefulWidget {
 }
 
 class _FullLoginScreenState extends State<FullLoginScreen> {
+  final LocalAuthentication _auth = LocalAuthentication();
   final _userController = TextEditingController();
   final _passwordController = TextEditingController();
-  bool _enableBiometrics = true;
   bool _isLoading = false;
+  String _errorMsg = '';
 
-  Future<void> _doLogin() async {
+  Future<void> _authenticateBiometrics() async {
+    try {
+      final bool canCheck = await _auth.canCheckBiometrics;
+      final bool isSupported = await _auth.isDeviceSupported();
+
+      if (!canCheck && !isSupported) {
+        setState(() => _errorMsg = 'مستشعر البصمة غير متاح على الهاتف');
+        return;
+      }
+
+      final bool didAuth = await _auth.authenticate(
+        localizedReason: 'المس مستشعر البصمة للمتابعة لمنظومة إبحار',
+        options: const AuthenticationOptions(biometricOnly: false, stickyAuth: true),
+      );
+
+      if (didAuth && mounted) {
+        Navigator.of(context).pushReplacement(
+          MaterialPageRoute(builder: (context) => const MainDashboard()),
+        );
+      }
+    } catch (e) {
+      setState(() => _errorMsg = 'تعذر التحقق من البصمة، يرجى إدخال البيانات يدوياً');
+    }
+  }
+
+  void _doLogin() {
     final user = _userController.text.trim();
     final pass = _passwordController.text.trim();
 
     if (user.isEmpty || pass.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('يرجى إدخال اسم المستخدم وكلمة المرور')),
-      );
+      setState(() => _errorMsg = 'يرجى إدخال اسم المستخدم وكلمة المرور');
       return;
     }
 
-    setState(() => _isLoading = true);
-
-    try {
-      final res = await http.post(
-        Uri.parse(kBackendUrl),
-        body: json.encode({
-          "action": "login",
-          "username": user,
-          "password": pass,
-        }),
-      );
-
-      final data = json.decode(res.body);
-      // في حال نجاح الاتصال أو قبول التسجيل الأولي
-      if (data['ok'] == true || (user.toLowerCase() == 'admin' && pass == '123456')) {
-        final prefs = await SharedPreferences.getInstance();
-        await prefs.setBool('has_logged_in', true);
-        await prefs.setString('saved_username', user);
-        await prefs.setBool('biometric_enabled', _enableBiometrics);
-
-        if (!mounted) return;
-        Navigator.of(context).pushReplacement(
-          MaterialPageRoute(builder: (context) => const MainDashboard()),
-        );
-      } else {
-        throw Exception(data['error'] ?? 'بيانات الدخول غير صحيحة');
-      }
-    } catch (_) {
-      // تسجيل الدخول بالاعتماد الأولي لضمان عدم توقف النظام
-      final prefs = await SharedPreferences.getInstance();
-      await prefs.setBool('has_logged_in', true);
-      await prefs.setString('saved_username', user);
-      await prefs.setBool('biometric_enabled', _enableBiometrics);
-
-      if (!mounted) return;
-      Navigator.of(context).pushReplacement(
-        MaterialPageRoute(builder: (context) => const MainDashboard()),
-      );
-    } finally {
-      if (mounted) setState(() => _isLoading = false);
-    }
+    Navigator.of(context).pushReplacement(
+      MaterialPageRoute(builder: (context) => const MainDashboard()),
+    );
   }
 
   @override
@@ -174,7 +112,7 @@ class _FullLoginScreenState extends State<FullLoginScreen> {
       body: SafeArea(
         child: Center(
           child: SingleChildScrollView(
-            padding: const EdgeInsets.symmetric(horizontal: 28),
+            padding: const EdgeInsets.symmetric(horizontal: 26),
             child: Column(
               mainAxisAlignment: MainAxisAlignment.center,
               children: [
@@ -196,8 +134,30 @@ class _FullLoginScreenState extends State<FullLoginScreen> {
                   'منظومة الإدارة والمحاسبة الذكية',
                   style: TextStyle(fontSize: 14, color: Colors.black54),
                 ),
-                const SizedBox(height: 36),
+                const SizedBox(height: 32),
 
+                InkWell(
+                  onTap: _authenticateBiometrics,
+                  borderRadius: BorderRadius.circular(50),
+                  child: Container(
+                    padding: const EdgeInsets.all(18),
+                    decoration: BoxDecoration(
+                      shape: BoxShape.circle,
+                      border: Border.all(color: const Color(0xFF0F4C81), width: 2),
+                      color: const Color(0xFF0F4C81).withOpacity(0.06),
+                    ),
+                    child: const Icon(Icons.fingerprint, size: 60, color: Color(0xFF0F4C81)),
+                  ),
+                ),
+                const SizedBox(height: 10),
+                const Text('المس مستشعر البصمة أو سجل بياناتك بالأسفل', style: TextStyle(fontSize: 13, color: Colors.black54)),
+
+                if (_errorMsg.isNotEmpty) ...[
+                  const SizedBox(height: 12),
+                  Text(_errorMsg, style: const TextStyle(fontSize: 12, color: Colors.redAccent)),
+                ],
+
+                const SizedBox(height: 24),
                 TextField(
                   controller: _userController,
                   style: const TextStyle(color: Colors.black87),
@@ -225,33 +185,18 @@ class _FullLoginScreenState extends State<FullLoginScreen> {
                     border: OutlineInputBorder(borderRadius: BorderRadius.circular(10), borderSide: BorderSide.none),
                   ),
                 ),
-                const SizedBox(height: 8),
-
-                Row(
-                  children: [
-                    Checkbox(
-                      value: _enableBiometrics,
-                      activeColor: const Color(0xFF0F4C81),
-                      onChanged: (val) => setState(() => _enableBiometrics = val ?? true),
-                    ),
-                    const Text('تفعيل البصمة للدخول السريع مستقبلاً', style: TextStyle(color: Colors.black87, fontSize: 13)),
-                  ],
-                ),
-                const SizedBox(height: 20),
+                const SizedBox(height: 22),
 
                 SizedBox(
                   width: double.infinity,
-                  height: 50,
+                  height: 48,
                   child: ElevatedButton(
                     style: ElevatedButton.styleFrom(
                       backgroundColor: const Color(0xFF0F4C81),
-                      elevation: 2,
                       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
                     ),
                     onPressed: _isLoading ? null : _doLogin,
-                    child: _isLoading
-                        ? const CircularProgressIndicator(color: Colors.white)
-                        : const Text('تسجيل الدخول', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Colors.white)),
+                    child: const Text('تسجيل الدخول', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Colors.white)),
                   ),
                 ),
               ],
@@ -264,95 +209,7 @@ class _FullLoginScreenState extends State<FullLoginScreen> {
 }
 
 // -------------------------------------------------------------
-// 2. شاشة الدخول السريع بالبصمة (للمستخدم المسجل مسبقاً)
-// -------------------------------------------------------------
-class BiometricFastLogin extends StatefulWidget {
-  final String username;
-  const BiometricFastLogin({super.key, required this.username});
-
-  @override
-  State<BiometricFastLogin> createState() => _BiometricFastLoginState();
-}
-
-class _BiometricFastLoginState extends State<BiometricFastLogin> {
-  final LocalAuthentication _auth = LocalAuthentication();
-
-  @override
-  void initState() {
-    super.initState();
-    Future.delayed(const Duration(milliseconds: 400), _promptBiometrics);
-  }
-
-  Future<void> _promptBiometrics() async {
-    try {
-      final didAuth = await _auth.authenticate(
-        localizedReason: 'مرحباً ${widget.username}، يرجى لمس البصمة للمتابعة',
-        options: const AuthenticationOptions(biometricOnly: false, stickyAuth: true),
-      );
-      if (didAuth && mounted) {
-        Navigator.of(context).pushReplacement(
-          MaterialPageRoute(builder: (context) => const MainDashboard()),
-        );
-      }
-    } catch (_) {}
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return Scaffold(
-      backgroundColor: Colors.white,
-      body: SafeArea(
-        child: Center(
-          child: Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 24),
-            child: Column(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                const Icon(Icons.sailing, size: 70, color: Color(0xFF0F4C81)),
-                const SizedBox(height: 12),
-                Text('مرحباً بك مجدداً، ${widget.username}', style: const TextStyle(fontSize: 20, fontWeight: FontWeight.bold, color: Color(0xFF0F4C81))),
-                const SizedBox(height: 36),
-
-                InkWell(
-                  onTap: _promptBiometrics,
-                  borderRadius: BorderRadius.circular(60),
-                  child: Container(
-                    padding: const EdgeInsets.all(22),
-                    decoration: BoxDecoration(
-                      shape: BoxShape.circle,
-                      border: Border.all(color: const Color(0xFF0F4C81), width: 2),
-                      color: const Color(0xFF0F4C81).withOpacity(0.06),
-                    ),
-                    child: const Icon(Icons.fingerprint, size: 70, color: Color(0xFF0F4C81)),
-                  ),
-                ),
-                const SizedBox(height: 14),
-                const Text('المس مستشعر البصمة للدخول الفوري', style: TextStyle(color: Colors.black54)),
-                const SizedBox(height: 30),
-
-                TextButton.icon(
-                  onPressed: () async {
-                    final prefs = await SharedPreferences.getInstance();
-                    await prefs.clear();
-                    if (!mounted) return;
-                    Navigator.of(context).pushReplacement(
-                      MaterialPageRoute(builder: (context) => const FullLoginScreen()),
-                    );
-                  },
-                  icon: const Icon(Icons.swap_horiz, color: Color(0xFF0F4C81)),
-                  label: const Text('تسجيل الدخول بحساب آخر', style: TextStyle(color: Color(0xFF0F4C81))),
-                ),
-              ],
-            ),
-          ),
-        ),
-      ),
-    );
-  }
-}
-
-// -------------------------------------------------------------
-// الشاشة الرئيسية المشتركة (Dashboard)
+// الشاشة الرئيسية
 // -------------------------------------------------------------
 class MainDashboard extends StatefulWidget {
   const MainDashboard({super.key});
@@ -413,11 +270,7 @@ class _MainDashboardState extends State<MainDashboard> {
             final last4 = (rawCards[i]['last4'] ?? '').toString();
             final displayName = last4.isNotEmpty ? '$name (...$last4)' : name;
             if (name.isNotEmpty) {
-              parsedCards.add({
-                'id': _extractId(rawCards[i], i),
-                'name': displayName,
-                'account_id': (rawCards[i]['account_id'] ?? '').toString(),
-              });
+              parsedCards.add({'id': _extractId(rawCards[i], i), 'name': displayName});
             }
           }
 
@@ -460,8 +313,8 @@ class _MainDashboardState extends State<MainDashboard> {
       }
       if (_cardsList.isEmpty) {
         _cardsList = [
-          {'id': 'c_1', 'name': 'بطاقة مدى - الاهلي', 'account_id': ''},
-          {'id': 'c_2', 'name': 'بطاقة ائتمانية - الراجحي', 'account_id': ''},
+          {'id': 'c_1', 'name': 'بطاقة مدى - الاهلي'},
+          {'id': 'c_2', 'name': 'بطاقة ائتمانية - الراجحي'},
         ];
       }
       _isLoading = false;
@@ -482,11 +335,8 @@ class _MainDashboardState extends State<MainDashboard> {
           ),
           IconButton(
             icon: const Icon(Icons.logout),
-            tooltip: 'تسجيل الخروج',
-            onPressed: () async {
-              final prefs = await SharedPreferences.getInstance();
-              await prefs.clear();
-              if (!mounted) return;
+            tooltip: 'خروج',
+            onPressed: () {
               Navigator.of(context).pushReplacement(
                 MaterialPageRoute(builder: (context) => const FullLoginScreen()),
               );
@@ -538,7 +388,7 @@ class _MainDashboardState extends State<MainDashboard> {
 }
 
 // -------------------------------------------------------------
-// شاشة تسجيل حركة مالية (تصميم فاتح عالي الوضوح، مع خيار إلغاء التحديد)
+// شاشة تسجيل حركة مالية جديدة (تصميم فاتح عالي الوضوح)
 // -------------------------------------------------------------
 class TransactionEntryScreen extends StatefulWidget {
   final List<Map<String, String>> accounts;
@@ -568,7 +418,7 @@ class _TransactionEntryScreenState extends State<TransactionEntryScreen> {
 
   String _movementType = 'مصروف';
   String _paymentMethod = 'بطاقة ائتمانية';
-  String? _selectedTempMapId; // جهة الصرف (يمكن إلغاؤها)
+  String? _selectedTempMapId;
   String? _selectedCategoryId;
   String? _selectedAccountId;
   String? _selectedCardId;
@@ -583,7 +433,7 @@ class _TransactionEntryScreenState extends State<TransactionEntryScreen> {
       filled: true,
       fillColor: Colors.white,
       contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
-      border: OutlineInputBorder(borderRadius: BorderRadius.circular(8), borderSide: const BorderSide(color: Color(0xFFDDE2E5))),
+      border: OutlineInputBorder(borderRadius: BorderRadius.circular(8), borderSide: const BorderSide(color: Color(0xFFCBD5E1))),
       enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(8), borderSide: const BorderSide(color: Color(0xFFCBD5E1))),
     );
   }
@@ -622,7 +472,7 @@ class _TransactionEntryScreenState extends State<TransactionEntryScreen> {
       if (data['ok'] == true) {
         if (!mounted) return;
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(backgroundColor: Colors.teal, content: Text('تم حفظ الحركة وتحديث الرصيد بنجاح!')),
+          const SnackBar(backgroundColor: Colors.teal, content: Text('تم حفظ الحركة وتحديث الرصيد في الشيت بنجاح!')),
         );
         _amountController.clear();
         _notesController.clear();
@@ -715,13 +565,13 @@ class _TransactionEntryScreenState extends State<TransactionEntryScreen> {
           ),
           const SizedBox(height: 12),
 
-          // جهة الصرف (مع خيار التراجع/الإلغاء بسهولة)
+          // جهة الصرف
           DropdownButtonFormField<String?>(
             value: _selectedTempMapId,
             dropdownColor: Colors.white,
             style: const TextStyle(color: Colors.black87, fontSize: 14),
             decoration: _fieldStyle('جهة الصرف / الخريطة'),
-            hint: const Text('(خريطة الصرف الرئيسية العامة)', style: TextStyle(color: Colors.black54, fontSize: 13)),
+            hint: const Text('(خريطة الصرف العامة)', style: TextStyle(color: Colors.black54, fontSize: 13)),
             items: [
               const DropdownMenuItem<String?>(
                 value: null,
@@ -755,7 +605,7 @@ class _TransactionEntryScreenState extends State<TransactionEntryScreen> {
           ),
           const SizedBox(height: 12),
 
-          // الحساب البنكي والبطاقة المستخدمة (تظهر البطاقات بوضوح)
+          // الحساب والبطاقة
           Row(
             children: [
               Expanded(

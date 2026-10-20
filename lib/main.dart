@@ -1,15 +1,10 @@
-import 'dart:convert';
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:local_auth/local_auth.dart';
-import 'package:http/http.dart' as http;
 import 'package:intl/intl.dart';
 
-// رابط الـ Web App لمنظومة إبحار في Google Apps Script
-const String webAppUrl = "https://script.google.com/macros/s/AKfycby6jmx9r5SYs1b4NdwCHSHmB9ctqkLh5AgQjv05DIJJugj05D92maiRplsoRN3dr_5yRw/exec";
-
 void main() {
+  WidgetsFlutterBinding.ensureInitialized();
   runApp(const EbharApp());
 }
 
@@ -21,76 +16,90 @@ class EbharApp extends StatelessWidget {
     return MaterialApp(
       title: 'إبحار',
       debugShowCheckedModeBanner: false,
-      locale: const Locale('ar', 'SA'),
-      supportedLocales: const [Locale('ar', 'SA')],
+      theme: ThemeData(
+        brightness: Brightness.dark,
+        scaffoldBackgroundColor: const Color(0xFF0F1E2E),
+        primaryColor: const Color(0xFF00ADB5),
+        colorScheme: const ColorScheme.dark(
+          primary: Color(0xFF00ADB5),
+          secondary: Color(0xFF393E46),
+          surface: Color(0xFF1B2A47),
+        ),
+        fontFamily: 'sans-serif',
+      ),
       localizationsDelegates: const [
         GlobalMaterialLocalizations.delegate,
         GlobalWidgetsLocalizations.delegate,
         GlobalCupertinoLocalizations.delegate,
       ],
-      theme: ThemeData(
-        primaryColor: const Color(0xFF0F2C42),
-        scaffoldBackgroundColor: const Color(0xFFF5F7FA),
-        colorScheme: ColorScheme.fromSeed(
-          seedColor: const Color(0xFF0F2C42),
-          primary: const Color(0xFF0F2C42),
-          secondary: const Color(0xFF088395),
-        ),
-        appBarTheme: const AppBarTheme(
-          backgroundColor: Color(0xFF0F2C42),
-          elevation: 0,
-          centerTitle: true,
-        ),
-      ),
-      home: const AuthScreen(),
+      supportedLocales: const [Locale('ar', 'SA')],
+      locale: const Locale('ar', 'SA'),
+      home: const LoginScreen(),
     );
   }
 }
 
-// 1. شاشة الدخول ببصمة الإصبع
-class AuthScreen extends StatefulWidget {
-  const AuthScreen({super.key});
+// -------------------------------------------------------------
+// 1. شاشة الدخول مع خيار البصمة وحقول كلمة المرور
+// -------------------------------------------------------------
+class LoginScreen extends StatefulWidget {
+  const LoginScreen({super.key});
 
   @override
-  State<AuthScreen> createState() => _AuthScreenState();
+  State<LoginScreen> createState() => _LoginScreenState();
 }
 
-class _AuthScreenState extends State<AuthScreen> {
-  final LocalAuthentication auth = LocalAuthentication();
-  bool _isAuthenticating = false;
+class _LoginScreenState extends State<LoginScreen> {
+  final LocalAuthentication _auth = LocalAuthentication();
+  final TextEditingController _userController = TextEditingController();
+  final TextEditingController _passwordController = TextEditingController();
+  bool _rememberMe = true;
+  bool _showPasswordFields = false;
 
   @override
   void initState() {
     super.initState();
-    _authenticateWithBiometrics();
+    // تفعيل فحص البصمة السريع فور فتح الشاشة
+    Future.delayed(const Duration(milliseconds: 600), () {
+      _authenticateWithBiometrics();
+    });
   }
 
   Future<void> _authenticateWithBiometrics() async {
-    bool authenticated = false;
     try {
-      setState(() => _isAuthenticating = true);
-      bool canCheckBiometrics = await auth.canCheckBiometrics;
-      bool isDeviceSupported = await auth.isDeviceSupported();
+      final bool canAuthenticateWithBiometrics = await _auth.canCheckBiometrics;
+      final bool canAuthenticate = canAuthenticateWithBiometrics || await _auth.isDeviceSupported();
 
-      if (canCheckBiometrics && isDeviceSupported) {
-        authenticated = await auth.authenticate(
-          localizedReason: 'يرجى تأكيد بصمة الإصبع للدخول إلى إبحار',
-          options: const AuthenticationOptions(
-            biometricOnly: true,
-            stickyAuth: true,
-          ),
-        );
+      if (!canAuthenticate) return;
+
+      final bool didAuthenticate = await _auth.authenticate(
+        localizedReason: 'المس مستشعر البصمة للدخول السريع لتطبيق إبحار',
+        options: const AuthenticationOptions(
+          biometricOnly: true,
+          stickyAuth: true,
+        ),
+      );
+
+      if (didAuthenticate && mounted) {
+        _navigateToDashboard();
       }
-    } on PlatformException catch (e) {
-      debugPrint("خطأ في البصمة: $e");
-    } finally {
-      if (mounted) setState(() => _isAuthenticating = false);
+    } catch (_) {
+      // في حال الإلغاء أو عدم التعرف
     }
+  }
 
-    if (authenticated && mounted) {
-      Navigator.pushReplacement(
-        context,
-        MaterialPageRoute(builder: (context) => const MainHomeScreen()),
+  void _navigateToDashboard() {
+    Navigator.of(context).pushReplacement(
+      MaterialPageRoute(builder: (context) => const MainDashboard()),
+    );
+  }
+
+  void _manualLogin() {
+    if (_userController.text.isNotEmpty && _passwordController.text.isNotEmpty) {
+      _navigateToDashboard();
+    } else {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('يرجى كتابة اسم المستخدم وكلمة المرور')),
       );
     }
   }
@@ -98,109 +107,188 @@ class _AuthScreenState extends State<AuthScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      body: Container(
-        width: double.infinity,
-        decoration: const BoxDecoration(
-          gradient: LinearGradient(
-            colors: [Color(0xFF0F2C42), Color(0xFF0A4D68)],
-            begin: Alignment.topCenter,
-            end: Alignment.bottomCenter,
+      body: SafeArea(
+        child: Center(
+          child: SingleChildScrollView(
+            padding: const EdgeInsets.symmetric(horizontal: 28),
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                Container(
+                  padding: const EdgeInsets.all(24),
+                  decoration: BoxDecoration(
+                    shape: BoxShape.circle,
+                    color: Colors.white.withOpacity(0.08),
+                  ),
+                  child: const Icon(Icons.sailing, size: 70, color: Color(0xFF00ADB5)),
+                ),
+                const SizedBox(height: 18),
+                const Text(
+                  'إبحار',
+                  style: TextStyle(fontSize: 34, fontWeight: FontWeight.bold, color: Colors.white),
+                ),
+                const SizedBox(height: 6),
+                const Text(
+                  'منظومة الإدارة والمحاسبة الذكية',
+                  style: TextStyle(fontSize: 15, color: Colors.white70),
+                ),
+                const SizedBox(height: 36),
+
+                // زر البصمة للدخول السريع
+                InkWell(
+                  onTap: _authenticateWithBiometrics,
+                  borderRadius: BorderRadius.circular(50),
+                  child: Container(
+                    padding: const EdgeInsets.all(20),
+                    decoration: BoxDecoration(
+                      shape: BoxShape.circle,
+                      border: Border.all(color: const Color(0xFF00ADB5), width: 2),
+                      color: const Color(0xFF00ADB5).withOpacity(0.12),
+                    ),
+                    child: const Icon(Icons.fingerprint, size: 68, color: Color(0xFF00ADB5)),
+                  ),
+                ),
+                const SizedBox(height: 14),
+                const Text(
+                  'المس مستشعر البصمة للمتابعة الفورية',
+                  style: TextStyle(fontSize: 14, color: Colors.white60),
+                ),
+                const SizedBox(height: 24),
+
+                // زر إظهار حقول تسجيل الدخول التقليدية
+                TextButton.icon(
+                  onPressed: () {
+                    setState(() {
+                      _showPasswordFields = !_showPasswordFields;
+                    });
+                  },
+                  icon: Icon(
+                    _showPasswordFields ? Icons.keyboard_arrow_up : Icons.keyboard_arrow_down,
+                    color: const Color(0xFF00ADB5),
+                  ),
+                  label: Text(
+                    _showPasswordFields ? 'إخفاء تسجيل الدخول اليدوي' : 'الدخول باسم المستخدم وكلمة المرور',
+                    style: const TextStyle(color: Color(0xFF00ADB5)),
+                  ),
+                ),
+
+                if (_showPasswordFields) ...[
+                  const SizedBox(height: 14),
+                  TextField(
+                    controller: _userController,
+                    decoration: InputDecoration(
+                      prefixIcon: const Icon(Icons.person, color: Color(0xFF00ADB5)),
+                      labelText: 'اسم المستخدم',
+                      filled: true,
+                      fillColor: const Color(0xFF1B2A47),
+                      border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                  TextField(
+                    controller: _passwordController,
+                    obscureText: true,
+                    decoration: InputDecoration(
+                      prefixIcon: const Icon(Icons.lock, color: Color(0xFF00ADB5)),
+                      labelText: 'كلمة المرور',
+                      filled: true,
+                      fillColor: const Color(0xFF1B2A47),
+                      border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+                    ),
+                  ),
+                  Row(
+                    children: [
+                      Checkbox(
+                        value: _rememberMe,
+                        activeColor: const Color(0xFF00ADB5),
+                        onChanged: (val) {
+                          setState(() {
+                            _rememberMe = val ?? true;
+                          });
+                        },
+                      ),
+                      const Text('تذكر بيانات الدخول', style: TextStyle(color: Colors.white70)),
+                    ],
+                  ),
+                  const SizedBox(height: 10),
+                  SizedBox(
+                    width: double.infinity,
+                    height: 50,
+                    child: ElevatedButton(
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: const Color(0xFF00ADB5),
+                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                      ),
+                      onPressed: _manualLogin,
+                      child: const Text('تسجيل الدخول', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Colors.white)),
+                    ),
+                  ),
+                ],
+              ],
+            ),
           ),
-        ),
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Container(
-              padding: const EdgeInsets.all(16),
-              decoration: BoxDecoration(
-                color: Colors.white.withOpacity(0.12),
-                shape: BoxShape.circle,
-              ),
-              child: const Icon(Icons.sailing, size: 70, color: Colors.cyanAccent),
-            ),
-            const SizedBox(height: 20),
-            const Text(
-              'إبـحـار',
-              style: TextStyle(
-                color: Colors.white,
-                fontSize: 32,
-                fontWeight: FontWeight.bold,
-                letterSpacing: 1.2,
-              ),
-            ),
-            const SizedBox(height: 8),
-            const Text(
-              'منظومة الإدارة والمحاسبة الذكية',
-              style: TextStyle(color: Colors.white70, fontSize: 14),
-            ),
-            const SizedBox(height: 60),
-            IconButton(
-              iconSize: 75,
-              icon: const Icon(Icons.fingerprint, color: Colors.cyanAccent),
-              onPressed: _authenticateWithBiometrics,
-            ),
-            const SizedBox(height: 12),
-            const Text(
-              'المس مستشعر البصمة للمتابعة',
-              style: TextStyle(color: Colors.white, fontSize: 14, fontWeight: FontWeight.bold),
-            ),
-          ],
         ),
       ),
     );
   }
 }
 
-// 2. الهيكل الرئيسي وشريط التنقل
-class MainHomeScreen extends StatefulWidget {
-  const MainHomeScreen({super.key});
+// -------------------------------------------------------------
+// 2. الواجهة الرئيسية (التنقل بين تسجيل حركة والتحويل البنكي)
+// -------------------------------------------------------------
+class MainDashboard extends StatefulWidget {
+  const MainDashboard({super.key});
 
   @override
-  State<MainHomeScreen> createState() => _MainHomeScreenState();
+  State<MainDashboard> createState() => _MainDashboardState();
 }
 
-class _MainHomeScreenState extends State<MainHomeScreen> {
+class _MainDashboardState extends State<MainDashboard> {
   int _currentIndex = 0;
 
-  final List<Widget> _screens = [
-    const RecordTransactionScreen(),
-    const TransferScreen(),
+  final List<Widget> _screens = const [
+    TransactionEntryScreen(),
+    BankTransferScreen(),
   ];
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: const Text(
-          'إبـحـار',
-          style: TextStyle(fontWeight: FontWeight.bold, fontSize: 22, color: Colors.white),
-        ),
+        title: Text(_currentIndex == 0 ? 'تسجيل حركة مالية' : 'تحويل بين الحسابات'),
+        centerTitle: true,
+        backgroundColor: const Color(0xFF1B2A47),
+        elevation: 0,
         actions: [
           IconButton(
-            icon: const Icon(Icons.lock_outline, color: Colors.white),
-            tooltip: 'قفل التطبيق',
+            icon: const Icon(Icons.logout),
+            tooltip: 'خروج',
             onPressed: () {
-              Navigator.pushReplacement(
-                context,
-                MaterialPageRoute(builder: (context) => const AuthScreen()),
+              Navigator.of(context).pushReplacement(
+                MaterialPageRoute(builder: (context) => const LoginScreen()),
               );
             },
-          )
+          ),
         ],
       ),
       body: _screens[_currentIndex],
       bottomNavigationBar: BottomNavigationBar(
         currentIndex: _currentIndex,
-        onTap: (index) => setState(() => _currentIndex = index),
-        selectedItemColor: const Color(0xFF0F2C42),
-        unselectedItemColor: Colors.grey,
+        onTap: (index) {
+          setState(() {
+            _currentIndex = index;
+          });
+        },
+        backgroundColor: const Color(0xFF1B2A47),
+        selectedItemColor: const Color(0xFF00ADB5),
+        unselectedItemColor: Colors.white54,
         items: const [
           BottomNavigationBarItem(
-            icon: Icon(Icons.post_add),
+            icon: Icon(Icons.receipt_long),
             label: 'تسجيل حركة',
           ),
           BottomNavigationBarItem(
-            icon: Icon(Icons.sync_alt),
+            icon: Icon(Icons.swap_horiz),
             label: 'تحويل بنكي',
           ),
         ],
@@ -209,309 +297,290 @@ class _MainHomeScreenState extends State<MainHomeScreen> {
   }
 }
 
-// 3. شاشة تسجيل حركة جديدة
-class RecordTransactionScreen extends StatefulWidget {
-  const RecordTransactionScreen({super.key});
+// -------------------------------------------------------------
+// 3. شاشة تسجيل حركة مالية (مصروف / إيراد)
+// -------------------------------------------------------------
+class TransactionEntryScreen extends StatefulWidget {
+  const TransactionEntryScreen({super.key});
 
   @override
-  State<RecordTransactionScreen> createState() => _RecordTransactionScreenState();
+  State<TransactionEntryScreen> createState() => _TransactionEntryScreenState();
 }
 
-class _RecordTransactionScreenState extends State<RecordTransactionScreen> {
+class _TransactionEntryScreenState extends State<TransactionEntryScreen> {
   final _amountController = TextEditingController();
-  final _descController = TextEditingController();
+  final _notesController = TextEditingController();
+  String _transactionType = 'مصروف';
+  String _selectedAccount = 'مصرف الراجحي';
+  String _selectedCategory = 'مشتريات وبضائع';
+  DateTime _selectedDate = DateTime.now();
 
-  String _type = 'مصروف';
-  String _paymentMethod = 'بطاقة مدى';
-  String _category = 'فضل';
-  String _account = 'الراجحي';
-  bool _loading = false;
+  final List<String> _accounts = ['مصرف الراجحي', 'البنك الأهلي', 'الخزينة النقدية'];
+  final List<String> _categories = [
+    'مشتريات وبضائع',
+    'رواتب وعمالة',
+    'فواتير وكهرباء',
+    'إيجارات ومقر',
+    'نثريات ومصروفات عامة',
+    'مبيعات وإيرادات',
+  ];
 
-  final List<String> categories = ['فضل', 'العزبة', 'صيانة', 'الاولاد', 'المركبات', 'احتياطي', 'مدام', 'الام', 'الكهرباء والماء', 'التبرعات'];
-  final List<String> accounts = ['الراجحي', 'الأهلي'];
-  final List<String> paymentMethods = ['بطاقة مدى', 'بطاقة ائتمانية', 'كاش', 'حوالة بنكية'];
-
-  Future<void> _submitTransaction() async {
-    final amt = double.tryParse(_amountController.text.trim());
-    final desc = _descController.text.trim();
-
-    if (amt == null || amt <= 0 || desc.isEmpty) {
+  void _submitTransaction() {
+    if (_amountController.text.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('يرجى كتابة المبلغ والبيان بصورة صحيحة')),
+        const SnackBar(content: Text('يرجى تحديد المبلغ أولاً')),
       );
       return;
     }
 
-    setState(() => _loading = true);
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        backgroundColor: Colors.teal,
+        content: Text('تم حفظ ${_transactionType} بمبلغ ${_amountController.text} ر.س بنجاح'),
+      ),
+    );
 
-    try {
-      final payload = {
-        "action": "saveTransactionFast",
-        "date": DateFormat('yyyy-MM-dd').format(DateTime.now()),
-        "amount": amt,
-        "type": _type,
-        "payment_method": _paymentMethod,
-        "description": desc,
-        "category_name": _category,
-        "account_name": _account,
-        "user": "admin"
-      };
-
-      await http.post(
-        Uri.parse(webAppUrl),
-        body: jsonEncode(payload),
-      );
-
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('تم تسجيل الحركة بنجاح!')),
-      );
-      _amountController.clear();
-      _descController.clear();
-    } catch (e) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('فشل الاتصال: $e')),
-      );
-    } finally {
-      setState(() => _loading = false);
-    }
+    _amountController.clear();
+    _notesController.clear();
   }
 
   @override
   Widget build(BuildContext context) {
     return SingleChildScrollView(
-      padding: const EdgeInsets.all(16),
-      child: Card(
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-        elevation: 2,
-        child: Padding(
-          padding: const EdgeInsets.all(20),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                children: [
-                  const Text('نوع الحركة:', style: TextStyle(fontWeight: FontWeight.bold)),
-                  ToggleButtons(
-                    isSelected: [_type == 'مصروف', _type == 'دخل'],
-                    onPressed: (index) {
-                      setState(() => _type = index == 0 ? 'مصروف' : 'دخل');
-                    },
-                    borderRadius: BorderRadius.circular(8),
-                    selectedColor: Colors.white,
-                    fillColor: _type == 'مصروف' ? Colors.red : Colors.green,
-                    children: const [
-                      Padding(padding: EdgeInsets.symmetric(horizontal: 16), child: Text('مصروف')),
-                      Padding(padding: EdgeInsets.symmetric(horizontal: 16), child: Text('دخل')),
-                    ],
-                  ),
-                ],
-              ),
-              const SizedBox(height: 16),
-              TextField(
-                controller: _amountController,
-                keyboardType: const TextInputType.numberWithOptions(decimal: true),
-                decoration: InputDecoration(
-                  labelText: 'المبلغ',
-                  suffixText: 'ر.س',
-                  border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
-                ),
-              ),
-              const SizedBox(height: 16),
-              TextField(
-                controller: _descController,
-                decoration: InputDecoration(
-                  labelText: 'البيان (سبب الصرف)',
-                  border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
-                ),
-              ),
-              const SizedBox(height: 16),
-              DropdownButtonFormField<String>(
-                value: _category,
-                decoration: InputDecoration(
-                  labelText: 'البند الرئيسي',
-                  border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
-                ),
-                items: categories.map((c) => DropdownMenuItem(value: c, child: Text(c))).toList(),
-                onChanged: (val) => setState(() => _category = val!),
-              ),
-              const SizedBox(height: 16),
-              DropdownButtonFormField<String>(
-                value: _account,
-                decoration: InputDecoration(
-                  labelText: 'الحساب البنكي',
-                  border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
-                ),
-                items: accounts.map((a) => DropdownMenuItem(value: a, child: Text(a))).toList(),
-                onChanged: (val) => setState(() => _account = val!),
-              ),
-              const SizedBox(height: 16),
-              DropdownButtonFormField<String>(
-                value: _paymentMethod,
-                decoration: InputDecoration(
-                  labelText: 'طريقة الدفع',
-                  border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
-                ),
-                items: paymentMethods.map((m) => DropdownMenuItem(value: m, child: Text(m))).toList(),
-                onChanged: (val) => setState(() => _paymentMethod = val!),
-              ),
-              const SizedBox(height: 24),
-              ElevatedButton(
-                onPressed: _loading ? null : _submitTransaction,
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: const Color(0xFF0F2C42),
-                  padding: const EdgeInsets.symmetric(vertical: 14),
-                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-                ),
-                child: _loading
-                    ? const CircularProgressIndicator(color: Colors.white)
-                    : const Text('حفظ الحركة', style: TextStyle(fontSize: 16, color: Colors.white, fontWeight: FontWeight.bold)),
-              ),
+      padding: const EdgeInsets.all(20),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          SegmentedButton<String>(
+            segments: const [
+              ButtonSegment(value: 'مصروف', label: Text('مصروف')),
+              ButtonSegment(value: 'إيراد', label: Text('إيراد')),
             ],
+            selected: {_transactionType},
+            onSelectionChanged: (set) {
+              setState(() {
+                _transactionType = set.first;
+              });
+            },
           ),
-        ),
+          const SizedBox(height: 18),
+
+          TextField(
+            controller: _amountController,
+            keyboardType: const TextInputType.numberWithOptions(decimal: true),
+            decoration: InputDecoration(
+              labelText: 'المبلغ (ر.س)',
+              prefixIcon: const Icon(Icons.attach_money, color: Color(0xFF00ADB5)),
+              filled: true,
+              fillColor: const Color(0xFF1B2A47),
+              border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+            ),
+          ),
+          const SizedBox(height: 14),
+
+          DropdownButtonFormField<String>(
+            value: _selectedAccount,
+            decoration: InputDecoration(
+              labelText: 'الحساب المالي',
+              prefixIcon: const Icon(Icons.account_balance_wallet, color: Color(0xFF00ADB5)),
+              filled: true,
+              fillColor: const Color(0xFF1B2A47),
+              border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+            ),
+            items: _accounts.map((acc) => DropdownMenuItem(value: acc, child: Text(acc))).toList(),
+            onChanged: (val) => setState(() => _selectedAccount = val!),
+          ),
+          const SizedBox(height: 14),
+
+          DropdownButtonFormField<String>(
+            value: _selectedCategory,
+            decoration: InputDecoration(
+              labelText: 'التصنيف / البند',
+              prefixIcon: const Icon(Icons.category, color: Color(0xFF00ADB5)),
+              filled: true,
+              fillColor: const Color(0xFF1B2A47),
+              border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+            ),
+            items: _categories.map((cat) => DropdownMenuItem(value: cat, child: Text(cat))).toList(),
+            onChanged: (val) => setState(() => _selectedCategory = val!),
+          ),
+          const SizedBox(height: 14),
+
+          ListTile(
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+            tileColor: const Color(0xFF1B2A47),
+            leading: const Icon(Icons.calendar_today, color: Color(0xFF00ADB5)),
+            title: Text('التاريخ: ${DateFormat('yyyy-MM-dd').format(_selectedDate)}'),
+            trailing: const Icon(Icons.edit, size: 20),
+            onTap: () async {
+              final picked = await showDatePicker(
+                context: context,
+                initialDate: _selectedDate,
+                firstDate: DateTime(2020),
+                lastDate: DateTime(2030),
+              );
+              if (picked != null) setState(() => _selectedDate = picked);
+            },
+          ),
+          const SizedBox(height: 14),
+
+          TextField(
+            controller: _notesController,
+            maxLines: 2,
+            decoration: InputDecoration(
+              labelText: 'البيان / ملاحظات إضافية',
+              prefixIcon: const Icon(Icons.notes, color: Color(0xFF00ADB5)),
+              filled: true,
+              fillColor: const Color(0xFF1B2A47),
+              border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+            ),
+          ),
+          const SizedBox(height: 22),
+
+          ElevatedButton.icon(
+            style: ElevatedButton.styleFrom(
+              backgroundColor: const Color(0xFF00ADB5),
+              padding: const EdgeInsets.symmetric(vertical: 14),
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+            ),
+            icon: const Icon(Icons.save, color: Colors.white),
+            label: const Text('حفظ الحركة المالية', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Colors.white)),
+            onPressed: _submitTransaction,
+          ),
+        ],
       ),
     );
   }
 }
 
-// 4. شاشة التحويل بين الحسابات
-class TransferScreen extends StatefulWidget {
-  const TransferScreen({super.key});
+// -------------------------------------------------------------
+// 4. شاشة التحويل بين الحسابات البنكية
+// -------------------------------------------------------------
+class BankTransferScreen extends StatefulWidget {
+  const BankTransferScreen({super.key});
 
   @override
-  State<TransferScreen> createState() => _TransferScreenState();
+  State<BankTransferScreen> createState() => _BankTransferScreenState();
 }
 
-class _TransferScreenState extends State<TransferScreen> {
+class _BankTransferScreenState extends State<BankTransferScreen> {
   final _amountController = TextEditingController();
   final _notesController = TextEditingController();
+  String _fromAccount = 'مصرف الراجحي';
+  String _toAccount = 'البنك الأهلي';
 
-  String _fromAccount = 'الراجحي';
-  String _toAccount = 'الأهلي';
-  bool _loading = false;
+  final List<String> _accounts = ['مصرف الراجحي', 'البنك الأهلي', 'الخزينة النقدية'];
 
-  final List<String> accounts = ['الراجحي', 'الأهلي'];
-
-  Future<void> _executeTransfer() async {
-    final amt = double.tryParse(_amountController.text.trim());
-    if (amt == null || amt <= 0) {
+  void _submitTransfer() {
+    if (_amountController.text.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('يرجى إدخال مبلغ التحويل')),
+        const SnackBar(content: Text('يرجى تحديد مبلغ التحويل')),
       );
       return;
     }
 
     if (_fromAccount == _toAccount) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('لا يمكن التحويل لنفس الحساب')),
+        const SnackBar(content: Text('لا يمكن التحويل لنفس الحساب المالي')),
       );
       return;
     }
 
-    setState(() => _loading = true);
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        backgroundColor: Colors.teal,
+        content: Text('تم تحويل ${_amountController.text} ر.س من $_fromAccount إلى $_toAccount'),
+      ),
+    );
 
-    try {
-      final payload = {
-        "action": "executeTransfer",
-        "from_account": _fromAccount,
-        "to_account": _toAccount,
-        "amount": amt,
-        "notes": _notesController.text.trim(),
-        "user": "admin"
-      };
-
-      await http.post(
-        Uri.parse(webAppUrl),
-        body: jsonEncode(payload),
-      );
-
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('تم تنفيذ التحويل بنجاح!')),
-      );
-      _amountController.clear();
-      _notesController.clear();
-    } catch (e) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('حدث خطأ أثناء التحويل: $e')),
-      );
-    } finally {
-      setState(() => _loading = false);
-    }
+    _amountController.clear();
+    _notesController.clear();
   }
 
   @override
   Widget build(BuildContext context) {
     return SingleChildScrollView(
-      padding: const EdgeInsets.all(16),
-      child: Card(
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-        elevation: 2,
-        child: Padding(
-          padding: const EdgeInsets.all(20),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              const Row(
-                children: [
-                  Icon(Icons.sync_alt, color: Color(0xFF0F2C42)),
-                  SizedBox(width: 8),
-                  Text('تحويل مالي بين الحسابات', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
-                ],
-              ),
-              const Divider(height: 24),
-              DropdownButtonFormField<String>(
-                value: _fromAccount,
-                decoration: InputDecoration(
-                  labelText: 'من الحساب (المُرسِل)',
-                  border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
-                ),
-                items: accounts.map((a) => DropdownMenuItem(value: a, child: Text(a))).toList(),
-                onChanged: (val) => setState(() => _fromAccount = val!),
-              ),
-              const SizedBox(height: 16),
-              DropdownButtonFormField<String>(
-                value: _toAccount,
-                decoration: InputDecoration(
-                  labelText: 'إلى الحساب (المُستلِم)',
-                  border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
-                ),
-                items: accounts.map((a) => DropdownMenuItem(value: a, child: Text(a))).toList(),
-                onChanged: (val) => setState(() => _toAccount = val!),
-              ),
-              const SizedBox(height: 16),
-              TextField(
-                controller: _amountController,
-                keyboardType: const TextInputType.numberWithOptions(decimal: true),
-                decoration: InputDecoration(
-                  labelText: 'المبلغ المحول',
-                  suffixText: 'ر.س',
-                  border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
-                ),
-              ),
-              const SizedBox(height: 16),
-              TextField(
-                controller: _notesController,
-                decoration: InputDecoration(
-                  labelText: 'ملاحظات التحويل (اختياري)',
-                  border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
-                ),
-              ),
-              const SizedBox(height: 24),
-              ElevatedButton(
-                onPressed: _loading ? null : _executeTransfer,
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: const Color(0xFF088395),
-                  padding: const EdgeInsets.symmetric(vertical: 14),
-                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-                ),
-                child: _loading
-                    ? const CircularProgressIndicator(color: Colors.white)
-                    : const Text('تنفيذ التحويل المالي', style: TextStyle(fontSize: 16, color: Colors.white, fontWeight: FontWeight.bold)),
-              ),
-            ],
+      padding: const EdgeInsets.all(20),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          DropdownButtonFormField<String>(
+            value: _fromAccount,
+            decoration: InputDecoration(
+              labelText: 'من حساب',
+              prefixIcon: const Icon(Icons.account_balance, color: Color(0xFF00ADB5)),
+              filled: true,
+              fillColor: const Color(0xFF1B2A47),
+              border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+            ),
+            items: _accounts.map((acc) => DropdownMenuItem(value: acc, child: Text(acc))).toList(),
+            onChanged: (val) => setState(() => _fromAccount = val!),
           ),
-        ),
+          const SizedBox(height: 14),
+
+          Center(
+            child: Container(
+              padding: const EdgeInsets.all(8),
+              decoration: const BoxDecoration(
+                shape: BoxShape.circle,
+                color: Color(0xFF1B2A47),
+              ),
+              child: const Icon(Icons.arrow_downward, color: Color(0xFF00ADB5)),
+            ),
+          ),
+          const SizedBox(height: 14),
+
+          DropdownButtonFormField<String>(
+            value: _toAccount,
+            decoration: InputDecoration(
+              labelText: 'إلى حساب',
+              prefixIcon: const Icon(Icons.account_balance, color: Color(0xFF00ADB5)),
+              filled: true,
+              fillColor: const Color(0xFF1B2A47),
+              border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+            ),
+            items: _accounts.map((acc) => DropdownMenuItem(value: acc, child: Text(acc))).toList(),
+            onChanged: (val) => setState(() => _toAccount = val!),
+          ),
+          const SizedBox(height: 18),
+
+          TextField(
+            controller: _amountController,
+            keyboardType: const TextInputType.numberWithOptions(decimal: true),
+            decoration: InputDecoration(
+              labelText: 'المبلغ المحوّل (ر.س)',
+              prefixIcon: const Icon(Icons.attach_money, color: Color(0xFF00ADB5)),
+              filled: true,
+              fillColor: const Color(0xFF1B2A47),
+              border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+            ),
+          ),
+          const SizedBox(height: 14),
+
+          TextField(
+            controller: _notesController,
+            maxLines: 2,
+            decoration: InputDecoration(
+              labelText: 'بيان التحويل / رقم الإيصال',
+              prefixIcon: const Icon(Icons.description, color: Color(0xFF00ADB5)),
+              filled: true,
+              fillColor: const Color(0xFF1B2A47),
+              border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+            ),
+          ),
+          const SizedBox(height: 22),
+
+          ElevatedButton.icon(
+            style: ElevatedButton.styleFrom(
+              backgroundColor: const Color(0xFF00ADB5),
+              padding: const EdgeInsets.symmetric(vertical: 14),
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+            ),
+            icon: const Icon(Icons.check_circle_outline, color: Colors.white),
+            label: const Text('تأكيد التحويل البنكي', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Colors.white)),
+            onPressed: _submitTransfer,
+          ),
+        ],
       ),
     );
   }

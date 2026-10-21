@@ -102,7 +102,7 @@ class _AuthGatekeeperState extends State<AuthGatekeeper> {
 }
 
 // -------------------------------------------------------------
-// شاشة تسجيل الدخول الأولى
+// 1. شاشة تسجيل الدخول الأولى (الأيقونة فوق الشعار ثم المالك في الأسفل)
 // -------------------------------------------------------------
 class FullLoginScreen extends StatefulWidget {
   const FullLoginScreen({super.key});
@@ -179,13 +179,25 @@ class _FullLoginScreenState extends State<FullLoginScreen> {
             child: Column(
               mainAxisAlignment: MainAxisAlignment.center,
               children: [
-                // الشعار المعتمد الجديد
+                // 1. أيقونة التطبيق مربعة بحواف منحنية
+                ClipRRect(
+                  borderRadius: BorderRadius.circular(20),
+                  child: Image.asset(
+                    'assets/app_icon.png',
+                    height: 80,
+                    width: 80,
+                    fit: BoxFit.cover,
+                  ),
+                ),
+                const SizedBox(height: 12),
+
+                // 2. الشعار النصي لإبحار
                 Image.asset(
                   'assets/logo.png',
-                  height: 110,
+                  height: 65,
                   fit: BoxFit.contain,
                 ),
-                const SizedBox(height: 8),
+                const SizedBox(height: 6),
                 const Text(
                   'منظومة الإدارة والمحاسبة الذكية',
                   style: TextStyle(fontSize: 13, color: Colors.black54, fontWeight: FontWeight.w500),
@@ -254,7 +266,7 @@ class _FullLoginScreenState extends State<FullLoginScreen> {
                 ),
 
                 const SizedBox(height: 35),
-                // سطر توثيق المالك في أسفل شاشة الدخول
+                // سطر توثيق المالك في أسفل الشاشة
                 const Text(
                   'المالك/ فضل بن عباس القديحي',
                   style: TextStyle(
@@ -274,7 +286,7 @@ class _FullLoginScreenState extends State<FullLoginScreen> {
 }
 
 // -------------------------------------------------------------
-// شاشة الدخول السريع بالبصمة
+// 2. شاشة الدخول السريع بالبصمة
 // -------------------------------------------------------------
 class BiometricPromptScreen extends StatefulWidget {
   final String username;
@@ -366,22 +378,32 @@ class _BiometricPromptScreenState extends State<BiometricPromptScreen> {
             child: Column(
               mainAxisAlignment: MainAxisAlignment.center,
               children: [
+                ClipRRect(
+                  borderRadius: BorderRadius.circular(16),
+                  child: Image.asset(
+                    'assets/app_icon.png',
+                    height: 70,
+                    width: 70,
+                    fit: BoxFit.cover,
+                  ),
+                ),
+                const SizedBox(height: 8),
                 Image.asset(
                   'assets/logo.png',
-                  height: 90,
+                  height: 55,
                   fit: BoxFit.contain,
                 ),
-                const SizedBox(height: 14),
-                Text('مرحباً ${widget.username}', style: const TextStyle(fontSize: 20, fontWeight: FontWeight.bold, color: Color(0xFF0F4C81))),
-                const SizedBox(height: 6),
+                const SizedBox(height: 12),
+                Text('مرحباً ${widget.username}', style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: Color(0xFF0F4C81))),
+                const SizedBox(height: 4),
                 const Text('الدخول السريع عبر البصمة', style: TextStyle(color: Colors.black54)),
-                const SizedBox(height: 32),
+                const SizedBox(height: 28),
 
                 InkWell(
                   onTap: _authenticate,
                   borderRadius: BorderRadius.circular(60),
                   child: Container(
-                    padding: const EdgeInsets.all(22),
+                    padding: const EdgeInsets.all(20),
                     decoration: BoxDecoration(
                       shape: BoxShape.circle,
                       border: Border.all(color: const Color(0xFF0F4C81), width: 2),
@@ -389,12 +411,12 @@ class _BiometricPromptScreenState extends State<BiometricPromptScreen> {
                     ),
                     child: _isVerifying
                         ? const CircularProgressIndicator(color: Color(0xFF0F4C81))
-                        : const Icon(Icons.fingerprint, size: 70, color: Color(0xFF0F4C81)),
+                        : const Icon(Icons.fingerprint, size: 65, color: Color(0xFF0F4C81)),
                   ),
                 ),
-                const SizedBox(height: 16),
+                const SizedBox(height: 14),
                 const Text('المس المستشعر لإعادة المحاولة', style: TextStyle(fontSize: 13, color: Colors.black54)),
-                const SizedBox(height: 28),
+                const SizedBox(height: 24),
 
                 TextButton.icon(
                   onPressed: _resetToManualLogin,
@@ -411,7 +433,7 @@ class _BiometricPromptScreenState extends State<BiometricPromptScreen> {
 }
 
 // -------------------------------------------------------------
-// الشاشة الرئيسية المشتركة (Dashboard)
+// 3. الشاشة الرئيسية المشتركة (Dashboard)
 // -------------------------------------------------------------
 class MainDashboard extends StatefulWidget {
   final Map<String, dynamic> currentUser;
@@ -601,7 +623,7 @@ class _MainDashboardState extends State<MainDashboard> {
 }
 
 // -------------------------------------------------------------
-// شاشة تسجيل حركة مالية جديدة
+// 4. شاشة تسجيل حركة مالية جديدة
 // -------------------------------------------------------------
 class TransactionEntryScreen extends StatefulWidget {
   final String currentUser;
@@ -799,7 +821,6 @@ class _TransactionEntryScreenState extends State<TransactionEntryScreen> {
           ),
           const SizedBox(height: 12),
 
-          // جهة الصرف
           DropdownButtonFormField<String?>(
             value: _selectedTempMapId,
             dropdownColor: Colors.white,
@@ -827,7 +848,6 @@ class _TransactionEntryScreenState extends State<TransactionEntryScreen> {
           ),
           const SizedBox(height: 12),
 
-          // البند التابع
           DropdownButtonFormField<String>(
             value: _selectedCategoryId,
             dropdownColor: Colors.white,
@@ -844,7 +864,6 @@ class _TransactionEntryScreenState extends State<TransactionEntryScreen> {
           ),
           const SizedBox(height: 12),
 
-          // الحساب البنكي
           DropdownButtonFormField<String>(
             value: _selectedAccountId,
             dropdownColor: Colors.white,
@@ -861,7 +880,6 @@ class _TransactionEntryScreenState extends State<TransactionEntryScreen> {
           ),
           const SizedBox(height: 12),
 
-          // البطاقة المستخدمة
           DropdownButtonFormField<String>(
             value: _selectedCardId,
             dropdownColor: Colors.white,
@@ -915,7 +933,7 @@ class _TransactionEntryScreenState extends State<TransactionEntryScreen> {
             onPressed: _isSaving ? null : _submitData,
           ),
 
-          // الشعار المعتمد الجديد وتوقيع المالك أسفل زر الحفظ
+          // الشعار المعتمد وتوقيع المالك أسفل زر الحفظ
           const SizedBox(height: 24),
           Center(
             child: Column(
@@ -947,7 +965,7 @@ class _TransactionEntryScreenState extends State<TransactionEntryScreen> {
 }
 
 // -------------------------------------------------------------
-// شاشة التحويل بين الحسابات
+// 5. شاشة التحويل بين الحسابات
 // -------------------------------------------------------------
 class BankTransferScreen extends StatefulWidget {
   final String currentUser;

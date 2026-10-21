@@ -27,6 +27,7 @@ jobs:
       - name: Setup Android Project & Permissions
         run: |
           flutter create --org com.ebhar.app --project-name ebhar_app .
+          sed -i 's/android:label="ebhar_app"/android:label="إبحار"/g' android/app/src/main/AndroidManifest.xml || true
           sed -i 's/minSdkVersion flutter.minSdkVersion/minSdkVersion 23/g' android/app/build.gradle || true
           sed -i 's/minSdk = flutter.minSdkVersion/minSdk = 23/g' android/app/build.gradle || true
           sed -i 's/io.flutter.embedding.android.FlutterActivity/io.flutter.embedding.android.FlutterFragmentActivity/g' android/app/src/main/AndroidManifest.xml || true

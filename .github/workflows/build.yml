@@ -25,11 +25,11 @@ jobs:
           channel: 'stable'
           cache: true
 
-      - name: Recreate Android Files
+      - name: Create Android Platform
         run: flutter create . --platforms android --org com.example
 
-      # فرض compileSdk 36 و minSdk 23 على التطبيق وكافة المكتبات الخارجية
-      - name: Force Android SDK 36
+      # ضبط التوافقية الشاملة على SDK 36
+      - name: Configure Android SDK
         run: |
           sed -i 's/compileSdkVersion .*/compileSdkVersion 36/g' android/app/build.gradle || true
           sed -i 's/compileSdk = .*/compileSdk = 36/g' android/app/build.gradle || true
@@ -38,7 +38,6 @@ jobs:
           sed -i 's/minSdkVersion .*/minSdkVersion 23/g' android/app/build.gradle || true
           sed -i 's/minSdk = .*/minSdk = 23/g' android/app/build.gradle || true
           
-          # حقن أمر عام لإجبار كل موديول خارجي على استخدام SDK 36
           cat << 'EOF' >> android/build.gradle
 
           subprojects {
@@ -55,11 +54,17 @@ jobs:
       - name: Install Dependencies
         run: flutter pub get
 
-      - name: Build APK
-        run: flutter build apk --debug
+      # بناء ملف APK وتجاوز فحص مسار Flutter الداخلي
+      - name: Build Android App via Gradle
+        run: |
+          cd android
+          chmod +x gradlew
+          ./gradlew assembleDebug --no-daemon
 
+      # التقاط ملف الـ APK تلقائياً ورفعه من أي مسار تم إنشاؤه فيه
       - name: Upload APK Artifact
         uses: actions/upload-artifact@v4
         with:
           name: ebhar-app-debug
-          path: build/app/outputs/flutter-apk/app-debug.apk
+          path: "**/build/**/outputs/**/*.apk"
+          if-no-files-found: error

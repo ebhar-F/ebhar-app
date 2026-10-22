@@ -25,10 +25,21 @@ jobs:
           channel: 'stable'
           cache: true
 
+      # 1. إنشاء ملفات منصة الأندرويد
       - name: Create Android Platform
         run: flutter create . --platforms android --org com.example
 
-      # ضبط minSdk إلى 24 لتلبية شرط مكتبة local_auth و compileSdk إلى 36
+      # 2. حقن إعدادات البصمة وأيقونة التطبيق في الأندرويد
+      - name: Configure Android Biometrics and Manifest
+        run: |
+          # ترقية MainActivity إلى FlutterFragmentActivity لتعمل البصمة
+          sed -i 's/import io.flutter.embedding.android.FlutterActivity/import io.flutter.embedding.android.FlutterFragmentActivity/g' android/app/src/main/kotlin/com/example/ebhar_app/MainActivity.kt || true
+          sed -i 's/class MainActivity: FlutterActivity()/class MainActivity: FlutterFragmentActivity()/g' android/app/src/main/kotlin/com/example/ebhar_app/MainActivity.kt || true
+
+          # إضافة تصاريح البصمة والإنترنت إلى AndroidManifest.xml
+          sed -i '/<manifest/a \    <uses-permission android:name="android.permission.INTERNET"\/>\n    <uses-permission android:name="android.permission.USE_BIOMETRIC"\/>\n    <uses-permission android:name="android.permission.USE_FINGERPRINT"\/>' android/app/src/main/AndroidManifest.xml || true
+
+      # 3. ضبط إصدارات SDK
       - name: Configure Android SDK
         run: |
           sed -i 's/compileSdkVersion .*/compileSdkVersion 36/g' android/app/build.gradle || true
@@ -54,14 +65,18 @@ jobs:
       - name: Install Dependencies
         run: flutter pub get
 
-      # بناء ملف APK عبر Gradle
+      # 4. توليد أيقونات التطبيق تلقائياً
+      - name: Generate App Launcher Icons
+        run: dart run flutter_launcher_icons
+
+      # 5. بناء ملف APK
       - name: Build Android App via Gradle
         run: |
           cd android
           chmod +x gradlew
           ./gradlew assembleDebug --no-daemon
 
-      # رفع ملف الـ APK الناتج
+      # 6. رفع ملف الـ APK
       - name: Upload APK Artifact
         uses: actions/upload-artifact@v4
         with:

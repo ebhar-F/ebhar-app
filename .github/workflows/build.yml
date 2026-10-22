@@ -25,21 +25,22 @@ jobs:
           channel: 'stable'
           cache: true
 
-      # إنشاء ملفات منصة أندرويد
       - name: Create Android Platform
         run: flutter create . --platforms android --org com.example
 
-      # تثبيت الحزم
-      - name: Install Dependencies
-        run: flutter pub get
-
-      # توليد أيقونات التطبيق للأندرويد بأمان
-      - name: Generate App Launcher Icons
-        run: dart run flutter_launcher_icons || true
-
-      # ضبط التوافقية الشاملة على SDK 36 و minSdk 24
-      - name: Configure Android SDK
+      - name: Configure App Name and SDK
         run: |
+          # 1. تغيير اسم التطبيق الذي يظهر تحت الأيقونة على شاشة الهاتف إلى "إبحار"
+          sed -i 's/android:label="[^"]*"/android:label="إبحار"/g' android/app/src/main/AndroidManifest.xml || true
+          
+          # 2. إضافة أذونات البصمة في الـ Manifest
+          sed -i '/<application/i <uses-permission android:name="android.permission.USE_BIOMETRIC"\/>\n<uses-permission android:name="android.permission.USE_FINGERPRINT"\/>' android/app/src/main/AndroidManifest.xml || true
+          
+          # 3. ترقية النشاط الرئيسي ليدعم البصمة (FlutterFragmentActivity)
+          sed -i 's/FlutterActivity/FlutterFragmentActivity/g' android/app/src/main/kotlin/com/example/ebhar_app/MainActivity.kt 2>/dev/null || true
+          sed -i 's/FlutterActivity/FlutterFragmentActivity/g' android/app/src/main/java/com/example/ebhar_app/MainActivity.java 2>/dev/null || true
+
+          # 4. ضبط إصدارات الأندرويد المطلوبة
           sed -i 's/compileSdkVersion .*/compileSdkVersion 36/g' android/app/build.gradle || true
           sed -i 's/compileSdk = .*/compileSdk = 36/g' android/app/build.gradle || true
           sed -i 's/targetSdkVersion .*/targetSdkVersion 36/g' android/app/build.gradle || true
@@ -60,14 +61,18 @@ jobs:
           }
           EOF
 
-      # بناء ملف APK عبر Gradle
+      - name: Install Dependencies
+        run: flutter pub get
+
+      - name: Generate App Launcher Icons
+        run: dart run flutter_launcher_icons || true
+
       - name: Build Android App via Gradle
         run: |
           cd android
           chmod +x gradlew
           ./gradlew assembleDebug --no-daemon
 
-      # رفع ملف الـ APK الناتج في Artifacts
       - name: Upload APK Artifact
         uses: actions/upload-artifact@v4
         with:

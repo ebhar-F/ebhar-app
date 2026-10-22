@@ -25,25 +25,27 @@ jobs:
           channel: 'stable'
           cache: true
 
-      # إنشاء ملفات منصة أندرويد تلقائياً إذا كانت ناقصة
-      - name: Recreate Android Project Files
+      # إنشاء ملفات أندرويد الأساسية في حال كانت ناقصة
+      - name: Ensure Android Platform Exists
         run: flutter create . --platforms android --org com.example
 
-      # ضبط compileSdk و minSdk للتوافق مع مكتبة البصمة والاتصال
-      - name: Configure Android SDK Versions
+      # ترقية وضبط إصدارات الـ SDK المتوافقة مع البصمة وشبكة الاتصال
+      - name: Set Android SDK Versions
         run: |
+          sed -i 's/minSdkVersion flutter.minSdkVersion/minSdkVersion 23/g' android/app/build.gradle || true
+          sed -i 's/minSdkVersion 21/minSdkVersion 23/g' android/app/build.gradle || true
           sed -i 's/compileSdkVersion flutter.compileSdkVersion/compileSdkVersion 34/g' android/app/build.gradle || true
-          sed -i 's/minSdkVersion flutter.minSdkVersion/minSdkVersion 21/g' android/app/build.gradle || true
           sed -i 's/targetSdkVersion flutter.targetSdkVersion/targetSdkVersion 34/g' android/app/build.gradle || true
 
       - name: Install Dependencies
         run: flutter pub get
 
+      # بناء ملف APK وتفعيل Multidex لحل مشاكل تضارب المكتبات
       - name: Build APK
         run: flutter build apk --debug
 
       - name: Upload APK Artifact
         uses: actions/upload-artifact@v4
         with:
-          name: app-debug
+          name: ebhar-app-debug
           path: build/app/outputs/flutter-apk/app-debug.apk

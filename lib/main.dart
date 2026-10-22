@@ -1,4 +1,6 @@
+import 'dart:async';
 import 'dart:convert';
+import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
@@ -6,8 +8,10 @@ import 'package:local_auth/local_auth.dart';
 import 'package:intl/intl.dart';
 import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:connectivity_plus/connectivity_plus.dart';
 
 const String kBackendUrl = 'https://script.google.com/macros/s/AKfycby6jmx9r5SYs1b4NdwCHSHmB9ctqkLh5AgQjv5DIJlJugj05D92maiRpIsoRN3dr_5yRw/exec';
+const String kOfflineQueueKey = 'ebhar_pending_offline_txns';
 
 void main() {
   WidgetsFlutterBinding.ensureInitialized();
@@ -51,7 +55,39 @@ class EbharApp extends StatelessWidget {
 }
 
 // -------------------------------------------------------------
-// بوابة الفحص: تحديد مسار الدخول (بصمة دائمة أو تسجيل يدوي)
+// إدارة طابور الحركات غير المرسلة (Offline Queue Manager)
+// -------------------------------------------------------------
+class OfflineManager {
+  static Future<List<Map<String, dynamic>>> getQueue() async {
+    final prefs = await SharedPreferences.getInstance();
+    final list = prefs.getStringList(kOfflineQueueKey) ?? [];
+    return list.map((item) => json.decode(item) as Map<String, dynamic>).toList();
+  }
+
+  static Future<void> enqueue(Map<String, dynamic> txn) async {
+    final prefs = await SharedPreferences.getInstance();
+    final list = prefs.getStringList(kOfflineQueueKey) ?? [];
+    list.add(json.encode(txn));
+    await prefs.setStringList(kOfflineQueueKey, list);
+  }
+
+  static Future<void> removeAt(int index) async {
+    final prefs = await SharedPreferences.getInstance();
+    final list = prefs.getStringList(kOfflineQueueKey) ?? [];
+    if (index >= 0 && index < list.length) {
+      list.removeAt(index);
+      await prefs.setStringList(kOfflineQueueKey, list);
+    }
+  }
+
+  static Future<void> clear() async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.remove(kOfflineQueueKey);
+  }
+}
+
+// -------------------------------------------------------------
+// بوابة الفحص: تحديد مسار الدخول
 // -------------------------------------------------------------
 class AuthGatekeeper extends StatefulWidget {
   const AuthGatekeeper({super.key});
@@ -102,7 +138,7 @@ class _AuthGatekeeperState extends State<AuthGatekeeper> {
 }
 
 // -------------------------------------------------------------
-// 1. شاشة تسجيل الدخول الأولى (الأيقونة فوق الشعار ثم المالك في الأسفل)
+// 1. شاشة تسجيل الدخول الأولى
 // -------------------------------------------------------------
 class FullLoginScreen extends StatefulWidget {
   const FullLoginScreen({super.key});
@@ -139,7 +175,7 @@ class _FullLoginScreenState extends State<FullLoginScreen> {
         'password': password,
       });
 
-      final res = await http.get(uri);
+      final res = await http.get(uri).timeout(const Duration(seconds: 10));
       final data = json.decode(res.body);
 
       if (data['ok'] == true) {
@@ -162,7 +198,7 @@ class _FullLoginScreenState extends State<FullLoginScreen> {
         setState(() => _errorMsg = data['error'] ?? 'بيانات الدخول غير صحيحة');
       }
     } catch (e) {
-      setState(() => _errorMsg = 'تعذر التحقق من الحساب: $e');
+      setState(() => _errorMsg = 'تعذر الاتصال بالخادم. تحقق من الإنترنت.');
     } finally {
       if (mounted) setState(() => _isLoading = false);
     }
@@ -179,29 +215,14 @@ class _FullLoginScreenState extends State<FullLoginScreen> {
             child: Column(
               mainAxisAlignment: MainAxisAlignment.center,
               children: [
-                // 1. أيقونة التطبيق مربعة بحواف منحنية
                 ClipRRect(
                   borderRadius: BorderRadius.circular(20),
-                  child: Image.asset(
-                    'assets/app_icon.png',
-                    height: 80,
-                    width: 80,
-                    fit: BoxFit.cover,
-                  ),
+                  child: Image.asset('assets/app_icon.png', height: 80, width: 80, fit: BoxFit.cover),
                 ),
                 const SizedBox(height: 12),
-
-                // 2. الشعار النصي لإبحار
-                Image.asset(
-                  'assets/logo.png',
-                  height: 65,
-                  fit: BoxFit.contain,
-                ),
+                Image.asset('assets/logo.png', height: 65, fit: BoxFit.contain),
                 const SizedBox(height: 6),
-                const Text(
-                  'منظومة الإدارة والمحاسبة الذكية',
-                  style: TextStyle(fontSize: 13, color: Colors.black54, fontWeight: FontWeight.w500),
-                ),
+                const Text('منظومة الإدارة والمحاسبة الذكية', style: TextStyle(fontSize: 13, color: Colors.black54, fontWeight: FontWeight.w500)),
                 const SizedBox(height: 28),
 
                 if (_errorMsg.isNotEmpty) ...[
@@ -264,17 +285,10 @@ class _FullLoginScreenState extends State<FullLoginScreen> {
                         : const Text('تسجيل الدخول والتحقق', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Colors.white)),
                   ),
                 ),
-
                 const SizedBox(height: 35),
-                // سطر توثيق المالك في أسفل الشاشة
                 const Text(
                   'المالك/ فضل بن عباس القديحي',
-                  style: TextStyle(
-                    fontSize: 13,
-                    fontWeight: FontWeight.bold,
-                    color: Color(0xFF0F4C81),
-                    letterSpacing: 0.2,
-                  ),
+                  style: TextStyle(fontSize: 13, fontWeight: FontWeight.bold, color: Color(0xFF0F4C81), letterSpacing: 0.2),
                 ),
               ],
             ),
@@ -286,7 +300,7 @@ class _FullLoginScreenState extends State<FullLoginScreen> {
 }
 
 // -------------------------------------------------------------
-// 2. شاشة الدخول السريع بالبصمة
+// 2. شاشة الدخول بالبصمة
 // -------------------------------------------------------------
 class BiometricPromptScreen extends StatefulWidget {
   final String username;
@@ -330,7 +344,7 @@ class _BiometricPromptScreenState extends State<BiometricPromptScreen> {
         'password': widget.password,
       });
 
-      final res = await http.get(uri);
+      final res = await http.get(uri).timeout(const Duration(seconds: 8));
       final data = json.decode(res.body);
 
       if (data['ok'] == true && mounted) {
@@ -341,12 +355,10 @@ class _BiometricPromptScreenState extends State<BiometricPromptScreen> {
         );
       } else {
         if (!mounted) return;
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text(data['error'] ?? 'تم تعطيل الحساب أو تغيير كلمة المرور')),
-        );
         _resetToManualLogin();
       }
     } catch (_) {
+      // عند تعذر الاتصال: السماح بالدخول لتمكين التسجيل Offline
       if (!mounted) return;
       Navigator.of(context).pushReplacement(
         MaterialPageRoute(
@@ -380,19 +392,10 @@ class _BiometricPromptScreenState extends State<BiometricPromptScreen> {
               children: [
                 ClipRRect(
                   borderRadius: BorderRadius.circular(16),
-                  child: Image.asset(
-                    'assets/app_icon.png',
-                    height: 70,
-                    width: 70,
-                    fit: BoxFit.cover,
-                  ),
+                  child: Image.asset('assets/app_icon.png', height: 70, width: 70, fit: BoxFit.cover),
                 ),
                 const SizedBox(height: 8),
-                Image.asset(
-                  'assets/logo.png',
-                  height: 55,
-                  fit: BoxFit.contain,
-                ),
+                Image.asset('assets/logo.png', height: 55, fit: BoxFit.contain),
                 const SizedBox(height: 12),
                 Text('مرحباً ${widget.username}', style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: Color(0xFF0F4C81))),
                 const SizedBox(height: 4),
@@ -433,7 +436,7 @@ class _BiometricPromptScreenState extends State<BiometricPromptScreen> {
 }
 
 // -------------------------------------------------------------
-// 3. الشاشة الرئيسية المشتركة (Dashboard)
+// 3. الشاشة الرئيسية المشتركة مع مراقبة المزامنة
 // -------------------------------------------------------------
 class MainDashboard extends StatefulWidget {
   final Map<String, dynamic> currentUser;
@@ -446,6 +449,9 @@ class MainDashboard extends StatefulWidget {
 class _MainDashboardState extends State<MainDashboard> {
   int _currentIndex = 0;
   bool _isLoading = true;
+  int _pendingCount = 0;
+  bool _isSyncing = false;
+  StreamSubscription<ConnectivityResult>? _connSub;
 
   List<Map<String, String>> _accountsList = [];
   List<Map<String, dynamic>> _cardsList = [];
@@ -457,6 +463,170 @@ class _MainDashboardState extends State<MainDashboard> {
   void initState() {
     super.initState();
     _fetchSystemData();
+    _updatePendingCount();
+    _listenConnectivity();
+  }
+
+  @override
+  void dispose() {
+    _connSub?.cancel();
+    super.dispose();
+  }
+
+  void _listenConnectivity() {
+    _connSub = Connectivity().onConnectivityChanged.listen((result) {
+      if (result != ConnectivityResult.none && _pendingCount > 0 && !_isSyncing) {
+        _syncAllPending();
+      }
+    });
+  }
+
+  Future<void> _updatePendingCount() async {
+    final queue = await OfflineManager.getQueue();
+    if (mounted) {
+      setState(() => _pendingCount = queue.length);
+    }
+  }
+
+  Future<void> _syncAllPending() async {
+    if (_isSyncing) return;
+    final queue = await OfflineManager.getQueue();
+    if (queue.isEmpty) return;
+
+    setState(() => _isSyncing = true);
+    int sentCount = 0;
+    List<Map<String, dynamic>> failed = [];
+
+    for (var txn in queue) {
+      try {
+        final uri = Uri.parse(kBackendUrl).replace(queryParameters: {
+          'action': 'saveTransaction',
+          'payload': json.encode(txn),
+        });
+
+        final res = await http.get(uri).timeout(const Duration(seconds: 8));
+        final data = json.decode(res.body);
+
+        if (data['ok'] == true) {
+          sentCount++;
+        } else {
+          failed.add(txn);
+        }
+      } catch (_) {
+        failed.add(txn);
+      }
+    }
+
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setStringList(kOfflineQueueKey, failed.map((f) => json.encode(f)).toList());
+
+    if (mounted) {
+      setState(() {
+        _pendingCount = failed.length;
+        _isSyncing = false;
+      });
+
+      if (sentCount > 0) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            backgroundColor: Colors.teal,
+            content: Text('تمت مزامنة $sentCount حركة وإرسال الإشعارات البريدية بنجاح!'),
+          ),
+        );
+        _fetchSystemData();
+      }
+    }
+  }
+
+  void _showPendingQueueSheet() async {
+    final queue = await OfflineManager.getQueue();
+    if (!mounted) return;
+
+    showModalBottomSheet(
+      context: context,
+      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(16))),
+      builder: (ctx) {
+        return StatefulBuilder(
+          builder: (context, setSheetState) {
+            return Container(
+              padding: const EdgeInsets.all(16),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      Text(
+                        'الحركات المعلقة للرفع (${queue.length})',
+                        style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16, color: Color(0xFF0F4C81)),
+                      ),
+                      if (queue.isNotEmpty)
+                        TextButton.icon(
+                          icon: _isSyncing
+                              ? const SizedBox(width: 14, height: 14, child: CircularProgressIndicator(strokeWidth: 2))
+                              : const Icon(Icons.cloud_upload, size: 18),
+                          label: const Text('إرسال الكل الآن'),
+                          onPressed: _isSyncing
+                              ? null
+                              : () async {
+                                  Navigator.pop(ctx);
+                                  await _syncAllPending();
+                                },
+                        ),
+                    ],
+                  ),
+                  const Divider(),
+                  if (queue.isEmpty)
+                    const Padding(
+                      padding: EdgeInsets.symmetric(vertical: 24),
+                      child: Center(child: Text('لا توجد حركات معلقة. جميع العمليات متزامنة ✓', style: TextStyle(color: Colors.green, fontWeight: FontWeight.bold))),
+                    )
+                  else
+                    Flexible(
+                      child: ListView.separated(
+                        shrinkWrap: true,
+                        itemCount: queue.length,
+                        separatorBuilder: (_, __) => const Divider(height: 1),
+                        itemBuilder: (context, idx) {
+                          final item = queue[idx];
+                          return ListTile(
+                            contentPadding: EdgeInsets.zero,
+                            leading: CircleAvatar(
+                              backgroundColor: Colors.orange.shade100,
+                              child: const Icon(Icons.wifi_off, color: Colors.orange, size: 20),
+                            ),
+                            title: Text(item['description']?.toString().isNotEmpty == true ? item['description'] : 'بدون بيان', style: const TextStyle(fontWeight: FontWeight.bold)),
+                            subtitle: Text('${item['date']} | ${item['payment_method']}'),
+                            trailing: Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                Text('${item['amount']} ر.س', style: const TextStyle(fontWeight: FontWeight.bold, color: Colors.red)),
+                                IconButton(
+                                  icon: const Icon(Icons.delete_outline, color: Colors.red, size: 20),
+                                  onPressed: () async {
+                                    await OfflineManager.removeAt(idx);
+                                    final updated = await OfflineManager.getQueue();
+                                    setSheetState(() {
+                                      queue.clear();
+                                      queue.addAll(updated);
+                                    });
+                                    _updatePendingCount();
+                                  },
+                                ),
+                              ],
+                            ),
+                          );
+                        },
+                      ),
+                    ),
+                ],
+              ),
+            );
+          },
+        );
+      },
+    );
   }
 
   String _extractName(dynamic obj) {
@@ -472,75 +642,80 @@ class _MainDashboardState extends State<MainDashboard> {
 
   Future<void> _fetchSystemData() async {
     setState(() => _isLoading = true);
+    final prefs = await SharedPreferences.getInstance();
+
     try {
-      final res = await http.get(Uri.parse('$kBackendUrl?action=getInitialData'));
+      final res = await http.get(Uri.parse('$kBackendUrl?action=getInitialData')).timeout(const Duration(seconds: 8));
       if (res.statusCode == 200) {
         final data = json.decode(res.body);
         if (data['ok'] == true && data['data'] != null) {
-          final rawAccounts = (data['data']['accounts'] as List?) ?? [];
-          final rawCards = (data['data']['cards'] as List?) ?? [];
-          final rawCategories = (data['data']['categories'] as List?) ?? [];
-          final rawTempMaps = (data['data']['tempMaps'] as List?) ?? [];
-          final rawTempSub = (data['data']['tempSubCategories'] as List?) ?? [];
-
-          final parsedAccounts = <Map<String, String>>[];
-          for (int i = 0; i < rawAccounts.length; i++) {
-            final name = _extractName(rawAccounts[i]);
-            if (name.isNotEmpty) {
-              parsedAccounts.add({'id': _extractId(rawAccounts[i], i), 'name': name});
-            }
-          }
-
-          final parsedCards = <Map<String, dynamic>>[];
-          for (int i = 0; i < rawCards.length; i++) {
-            final name = _extractName(rawCards[i]);
-            final last4 = (rawCards[i]['last4'] ?? '').toString();
-            final displayName = last4.isNotEmpty ? '$name (...$last4)' : name;
-            final accId = (rawCards[i]['account_id'] ?? '').toString();
-            if (name.isNotEmpty) {
-              parsedCards.add({'id': _extractId(rawCards[i], i), 'name': displayName, 'account_id': accId});
-            }
-          }
-
-          final parsedCategories = <Map<String, String>>[];
-          for (int i = 0; i < rawCategories.length; i++) {
-            final name = _extractName(rawCategories[i]);
-            if (name.isNotEmpty) {
-              parsedCategories.add({'id': _extractId(rawCategories[i], i), 'name': name});
-            }
-          }
-
-          final parsedTempMaps = <Map<String, String>>[];
-          for (int i = 0; i < rawTempMaps.length; i++) {
-            final name = _extractName(rawTempMaps[i]);
-            if (name.isNotEmpty) {
-              parsedTempMaps.add({'id': _extractId(rawTempMaps[i], i), 'name': name});
-            }
-          }
-
-          final parsedTempSub = <Map<String, dynamic>>[];
-          for (int i = 0; i < rawTempSub.length; i++) {
-            final name = _extractName(rawTempSub[i]);
-            final mapId = (rawTempSub[i]['map_id'] ?? rawTempSub[i]['temp_map_id'] ?? '').toString();
-            if (name.isNotEmpty) {
-              parsedTempSub.add({'id': _extractId(rawTempSub[i], i), 'name': name, 'map_id': mapId});
-            }
-          }
-
-          setState(() {
-            _accountsList = parsedAccounts;
-            _cardsList = parsedCards;
-            _categoriesList = parsedCategories;
-            _tempMapsList = parsedTempMaps;
-            _tempSubCategoriesList = parsedTempSub;
-            _isLoading = false;
-          });
+          await prefs.setString('cached_initial_data', res.body);
+          _parseAndPopulateData(data['data']);
           return;
         }
       }
-    } catch (_) {}
+    } catch (_) {
+      // قراءة البيانات من الكاش المحلي في حال انقطاع الشبكة
+      final cachedStr = prefs.getString('cached_initial_data');
+      if (cachedStr != null) {
+        final data = json.decode(cachedStr);
+        _parseAndPopulateData(data['data']);
+        return;
+      }
+    } finally {
+      if (mounted) setState(() => _isLoading = false);
+    }
+  }
 
-    setState(() => _isLoading = false);
+  void _parseAndPopulateData(Map<String, dynamic> raw) {
+    final rawAccounts = (raw['accounts'] as List?) ?? [];
+    final rawCards = (raw['cards'] as List?) ?? [];
+    final rawCategories = (raw['categories'] as List?) ?? [];
+    final rawTempMaps = (raw['tempMaps'] as List?) ?? [];
+    final rawTempSub = (raw['tempSubCategories'] as List?) ?? [];
+
+    final parsedAccounts = <Map<String, String>>[];
+    for (int i = 0; i < rawAccounts.length; i++) {
+      final name = _extractName(rawAccounts[i]);
+      if (name.isNotEmpty) parsedAccounts.add({'id': _extractId(rawAccounts[i], i), 'name': name});
+    }
+
+    final parsedCards = <Map<String, dynamic>>[];
+    for (int i = 0; i < rawCards.length; i++) {
+      final name = _extractName(rawCards[i]);
+      final last4 = (rawCards[i]['last4'] ?? '').toString();
+      final displayName = last4.isNotEmpty ? '$name (...$last4)' : name;
+      final accId = (rawCards[i]['account_id'] ?? '').toString();
+      if (name.isNotEmpty) parsedCards.add({'id': _extractId(rawCards[i], i), 'name': displayName, 'account_id': accId, 'last4': last4});
+    }
+
+    final parsedCategories = <Map<String, String>>[];
+    for (int i = 0; i < rawCategories.length; i++) {
+      final name = _extractName(rawCategories[i]);
+      if (name.isNotEmpty) parsedCategories.add({'id': _extractId(rawCategories[i], i), 'name': name});
+    }
+
+    final parsedTempMaps = <Map<String, String>>[];
+    for (int i = 0; i < rawTempMaps.length; i++) {
+      final name = _extractName(rawTempMaps[i]);
+      if (name.isNotEmpty) parsedTempMaps.add({'id': _extractId(rawTempMaps[i], i), 'name': name});
+    }
+
+    final parsedTempSub = <Map<String, dynamic>>[];
+    for (int i = 0; i < rawTempSub.length; i++) {
+      final name = _extractName(rawTempSub[i]);
+      final mapId = (rawTempSub[i]['map_id'] ?? rawTempSub[i]['temp_map_id'] ?? '').toString();
+      if (name.isNotEmpty) parsedTempSub.add({'id': _extractId(rawTempSub[i], i), 'name': name, 'map_id': mapId});
+    }
+
+    setState(() {
+      _accountsList = parsedAccounts;
+      _cardsList = parsedCards;
+      _categoriesList = parsedCategories;
+      _tempMapsList = parsedTempMaps;
+      _tempSubCategoriesList = parsedTempSub;
+      _isLoading = false;
+    });
   }
 
   @override
@@ -557,10 +732,42 @@ class _MainDashboardState extends State<MainDashboard> {
         ),
         centerTitle: true,
         actions: [
+          // شارة وخانة المهام المعلقة
+          Stack(
+            alignment: Alignment.center,
+            children: [
+              IconButton(
+                icon: Icon(
+                  _pendingCount > 0 ? Icons.cloud_queue : Icons.cloud_done,
+                  color: _pendingCount > 0 ? Colors.amberAccent : Colors.white70,
+                ),
+                tooltip: 'المهام المعلقة',
+                onPressed: _showPendingQueueSheet,
+              ),
+              if (_pendingCount > 0)
+                Positioned(
+                  top: 8,
+                  right: 8,
+                  child: Container(
+                    padding: const EdgeInsets.all(4),
+                    decoration: const BoxDecoration(color: Colors.red, shape: BoxShape.circle),
+                    constraints: const BoxConstraints(minWidth: 16, minHeight: 16),
+                    child: Text(
+                      '$_pendingCount',
+                      style: const TextStyle(color: Colors.white, fontSize: 9, fontWeight: FontWeight.bold),
+                      textAlign: TextAlign.center,
+                    ),
+                  ),
+                ),
+            ],
+          ),
           IconButton(
             icon: const Icon(Icons.refresh),
-            tooltip: 'تحديث البيانات من الشيت',
-            onPressed: _fetchSystemData,
+            tooltip: 'تحديث البيانات',
+            onPressed: () {
+              _fetchSystemData();
+              _updatePendingCount();
+            },
           ),
           IconButton(
             icon: const Icon(Icons.logout),
@@ -583,26 +790,58 @@ class _MainDashboardState extends State<MainDashboard> {
                 children: [
                   CircularProgressIndicator(color: Color(0xFF0F4C81)),
                   SizedBox(height: 14),
-                  Text('جاري تحديث البيانات من شيت إبحار...', style: TextStyle(color: Colors.black54)),
+                  Text('جاري تحميل البيانات...', style: TextStyle(color: Colors.black54)),
                 ],
               ),
             )
-          : IndexedStack(
-              index: _currentIndex,
+          : Column(
               children: [
-                TransactionEntryScreen(
-                  currentUser: userName,
-                  accounts: _accountsList,
-                  cards: _cardsList,
-                  categories: _categoriesList,
-                  tempMaps: _tempMapsList,
-                  tempSubCategories: _tempSubCategoriesList,
-                  onSuccess: _fetchSystemData,
-                ),
-                BankTransferScreen(
-                  currentUser: userName,
-                  accounts: _accountsList,
-                  onSuccess: _fetchSystemData,
+                // شريط تنبيه إذا وُجدت مهام تنتظر الإرسال
+                if (_pendingCount > 0)
+                  InkWell(
+                    onTap: _showPendingQueueSheet,
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+                      color: Colors.amber.shade100,
+                      child: Row(
+                        children: [
+                          const Icon(Icons.wifi_off, size: 16, color: Colors.orange),
+                          const SizedBox(width: 8),
+                          Expanded(
+                            child: Text(
+                              'لديك $_pendingCount حركة معلقة بانتظار الإرسال للسيرفر',
+                              style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: Colors.brown),
+                            ),
+                          ),
+                          const Text('عرض وإرسال', style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: Color(0xFF0F4C81))),
+                        ],
+                      ),
+                    ),
+                  ),
+                Expanded(
+                  child: IndexedStack(
+                    index: _currentIndex,
+                    children: [
+                      TransactionEntryScreen(
+                        currentUser: userName,
+                        accounts: _accountsList,
+                        cards: _cardsList,
+                        categories: _categoriesList,
+                        tempMaps: _tempMapsList,
+                        tempSubCategories: _tempSubCategoriesList,
+                        onSuccess: () {
+                          _fetchSystemData();
+                          _updatePendingCount();
+                        },
+                        onOfflineSaved: _updatePendingCount,
+                      ),
+                      BankTransferScreen(
+                        currentUser: userName,
+                        accounts: _accountsList,
+                        onSuccess: _fetchSystemData,
+                      ),
+                    ],
+                  ),
                 ),
               ],
             ),
@@ -623,7 +862,7 @@ class _MainDashboardState extends State<MainDashboard> {
 }
 
 // -------------------------------------------------------------
-// 4. شاشة تسجيل حركة مالية جديدة
+// 4. شاشة تسجيل حركة مع ميزة اللصق الذكي والمزامنة دون اتصال
 // -------------------------------------------------------------
 class TransactionEntryScreen extends StatefulWidget {
   final String currentUser;
@@ -633,6 +872,7 @@ class TransactionEntryScreen extends StatefulWidget {
   final List<Map<String, String>> tempMaps;
   final List<Map<String, dynamic>> tempSubCategories;
   final VoidCallback onSuccess;
+  final VoidCallback onOfflineSaved;
 
   const TransactionEntryScreen({
     super.key,
@@ -643,6 +883,7 @@ class TransactionEntryScreen extends StatefulWidget {
     required this.tempMaps,
     required this.tempSubCategories,
     required this.onSuccess,
+    required this.onOfflineSaved,
   });
 
   @override
@@ -689,12 +930,99 @@ class _TransactionEntryScreenState extends State<TransactionEntryScreen> {
     return widget.categories;
   }
 
+  // -----------------------------------------------------------
+  // محلل الرسائل النصية البنكية (SMS Parser)
+  // -----------------------------------------------------------
+  void _parsePastedSms(String text) {
+    if (text.trim().isEmpty) return;
+
+    double? extractedAmount;
+    String? extractedMerchant;
+    String? matchedCardLast4;
+    String detectedType = 'مصروف';
+    String detectedMethod = 'بطاقة مدى';
+
+    // 1. استخراج المبلغ (يدعم بـ4.00 SAR أو بـ12 أو ب57 SAR)
+    final amtRegex = RegExp(r'[ب|بـ]\s*([0-9]+(?:\.[0-9]+)?)\s*(?:SAR)?', caseSensitive: false);
+    final amtMatch = amtRegex.firstMatch(text);
+    if (amtMatch != null) {
+      extractedAmount = double.tryParse(amtMatch.group(1) ?? '');
+    }
+
+    // 2. فحص نوع الحركة
+    if (text.contains('حوالة واردة') || text.contains('إيداع') || text.contains('ايداع')) {
+      detectedType = 'دخل';
+      detectedMethod = 'حوالة بنكية';
+    } else if (text.contains('حوالة صادرة')) {
+      detectedType = 'مصروف';
+      detectedMethod = 'حوالة بنكية';
+    } else if (text.contains('إئتمانية') || text.contains('ائتمانية')) {
+      detectedType = 'مصروف';
+      detectedMethod = 'بطاقة ائتمانية';
+    } else if (text.contains('مدى')) {
+      detectedType = 'مصروف';
+      detectedMethod = 'بطاقة مدى';
+    }
+
+    // 3. استخراج اسم التاجر / المستفيد
+    if (text.contains('من ') || text.contains('من\n')) {
+      final m = RegExp(r'من\s*([^\n\r\*]+)').firstMatch(text);
+      if (m != null) extractedMerchant = m.group(1)?.trim();
+    } else if (text.contains('لـ') || text.contains('ل ')) {
+      final m = RegExp(r'[ل|لـ]\s*([^\n\r\*]+)').firstMatch(text);
+      if (m != null) extractedMerchant = m.group(1)?.trim();
+    }
+
+    // 4. استخراج آخر 4 أرقام للبطاقة (مثل **9074 أو *1897 أو من4410*)
+    final cardRegex = RegExp(r'(?:\*|\*{2})([0-9]{4})');
+    final cardMatch = cardRegex.firstMatch(text);
+    if (cardMatch != null) {
+      matchedCardLast4 = cardMatch.group(1);
+    } else {
+      final altCardMatch = RegExp(r'([0-9]{4})\*').firstMatch(text);
+      if (altCardMatch != null) matchedCardLast4 = altCardMatch.group(1);
+    }
+
+    setState(() {
+      if (extractedAmount != null) {
+        _amountController.text = extractedAmount.toString();
+      }
+      if (extractedMerchant != null && extractedMerchant.isNotEmpty) {
+        _notesController.text = extractedMerchant;
+      }
+      _movementType = detectedType;
+      _paymentMethod = detectedMethod;
+
+      // مطابقة البطاقة والحساب المسجل تلقائياً
+      if (matchedCardLast4 != null && widget.cards.isNotEmpty) {
+        final foundCard = widget.cards.firstWhere(
+          (c) => c['last4'].toString() == matchedCardLast4,
+          orElse: () => {},
+        );
+        if (foundCard.isNotEmpty) {
+          _selectedCardId = foundCard['id'].toString();
+          if (foundCard['account_id'] != null) {
+            _selectedAccountId = foundCard['account_id'].toString();
+          }
+        }
+      }
+    });
+
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(
+        backgroundColor: Colors.teal,
+        content: Text('تم تحليل بيانات الرسالة وتعبئة الخانات بنجاح! يرجى اختيار البند.'),
+      ),
+    );
+  }
+
+  // -----------------------------------------------------------
+  // حفظ الحركة (إرسال فوري أو حفظ في طابور الأوفلاين)
+  // -----------------------------------------------------------
   Future<void> _submitData() async {
     final amt = double.tryParse(_amountController.text);
     if (amt == null || amt <= 0) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('يرجى تحديد المبلغ أولاً')),
-      );
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('يرجى تحديد المبلغ أولاً')));
       return;
     }
 
@@ -720,25 +1048,46 @@ class _TransactionEntryScreenState extends State<TransactionEntryScreen> {
         'payload': json.encode(payload),
       });
 
-      final res = await http.get(uri);
+      final res = await http.get(uri).timeout(const Duration(seconds: 8));
       final data = json.decode(res.body);
 
       if (data['ok'] == true) {
         if (!mounted) return;
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(backgroundColor: Colors.teal, content: Text('تم تسجيل الحركة وتحديث الأرصدة بنجاح!')),
+          const SnackBar(backgroundColor: Colors.teal, content: Text('تم تسجيل الحركة وإرسال الإشعار البريدي بنجاح!')),
         );
         _amountController.clear();
         _notesController.clear();
         widget.onSuccess();
       } else {
-        throw Exception(data['error'] ?? 'تعذر الحفظ في قاعدة البيانات');
+        throw Exception(data['error']);
       }
-    } catch (e) {
+    } on SocketException catch (_) {
+      // انقطاع الإنترنت: حفظ محلي
+      await OfflineManager.enqueue(payload);
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(backgroundColor: Colors.redAccent, content: Text('خطأ أثناء الحفظ: $e')),
+        const SnackBar(
+          backgroundColor: Colors.orange,
+          content: Text('لا يوجد اتصال بالإنترنت. تم حفظ الحركة محلياً وسيتم إرسالها تلقائياً فور توفر الشبكة 💾'),
+        ),
       );
+      _amountController.clear();
+      _notesController.clear();
+      widget.onOfflineSaved();
+    } catch (e) {
+      // أي خطأ مهلة اتصال أو استثناء شبكة
+      await OfflineManager.enqueue(payload);
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          backgroundColor: Colors.orange,
+          content: Text('تعذر الوصول للسيرفر حالياً. تم حفظ الحركة في قائمة الانتظار للمزامنة 💾'),
+        ),
+      );
+      _amountController.clear();
+      _notesController.clear();
+      widget.onOfflineSaved();
     } finally {
       if (mounted) setState(() => _isSaving = false);
     }
@@ -753,6 +1102,29 @@ class _TransactionEntryScreenState extends State<TransactionEntryScreen> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
+          // زر اللصق الذكي للرسائل البنكية
+          OutlinedButton.icon(
+            style: OutlinedButton.styleFrom(
+              padding: const EdgeInsets.symmetric(vertical: 10),
+              side: const BorderSide(color: Color(0xFF0F4C81), width: 1.2),
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+            ),
+            icon: const Icon(Icons.paste, color: Color(0xFF0F4C81), size: 18),
+            label: const Text('📋 لصق وقراءة الرسالة البنكية تلقائياً', style: TextStyle(fontWeight: FontWeight.bold, color: Color(0xFF0F4C81), fontSize: 13)),
+            onPressed: () async {
+              final data = await Clipboard.getData(Clipboard.kTextPlain);
+              if (data != null && data.text != null) {
+                _parsePastedSms(data.text!);
+              } else {
+                if (!mounted) return;
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(content: Text('الحافظة فارغة، انسخ نص رسالة البنك أولاً')),
+                );
+              }
+            },
+          ),
+          const SizedBox(height: 12),
+
           Row(
             children: [
               Expanded(
@@ -927,32 +1299,22 @@ class _TransactionEntryScreenState extends State<TransactionEntryScreen> {
                 ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
                 : const Icon(Icons.check, color: Colors.white),
             label: Text(
-              _isSaving ? 'جاري الحفظ في الشيت...' : 'حفظ الحركة المالية',
+              _isSaving ? 'جاري الحفظ...' : 'حفظ الحركة المالية',
               style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Colors.white),
             ),
             onPressed: _isSaving ? null : _submitData,
           ),
 
-          // الشعار المعتمد وتوقيع المالك أسفل زر الحفظ
           const SizedBox(height: 24),
           Center(
             child: Column(
               mainAxisSize: MainAxisSize.min,
               children: [
-                Image.asset(
-                  'assets/logo.png',
-                  height: 60,
-                  fit: BoxFit.contain,
-                ),
+                Image.asset('assets/logo.png', height: 60, fit: BoxFit.contain),
                 const SizedBox(height: 4),
                 const Text(
                   'المالك/ فضل بن عباس القديحي',
-                  style: TextStyle(
-                    fontSize: 12,
-                    fontWeight: FontWeight.bold,
-                    color: Color(0xFF0F4C81),
-                    letterSpacing: 0.2,
-                  ),
+                  style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: Color(0xFF0F4C81), letterSpacing: 0.2),
                 ),
                 const SizedBox(height: 14),
               ],
@@ -993,23 +1355,17 @@ class _BankTransferScreenState extends State<BankTransferScreen> {
   Future<void> _submitTransfer() async {
     final amt = double.tryParse(_amountController.text);
     if (amt == null || amt <= 0) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('يرجى تحديد مبلغ التحويل')),
-      );
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('يرجى تحديد مبلغ التحويل')));
       return;
     }
 
     if (_fromAccountId == null || _toAccountId == null) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('يرجى اختيار الحساب المحول منه وإليه')),
-      );
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('يرجى اختيار الحساب المحول منه وإليه')));
       return;
     }
 
     if (_fromAccountId == _toAccountId) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('لا يمكن التحويل لنفس الحساب')),
-      );
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('لا يمكن التحويل لنفس الحساب')));
       return;
     }
 
@@ -1025,7 +1381,7 @@ class _BankTransferScreenState extends State<BankTransferScreen> {
         'user': widget.currentUser,
       });
 
-      final res = await http.get(uri);
+      final res = await http.get(uri).timeout(const Duration(seconds: 10));
       final data = json.decode(res.body);
 
       if (data['ok'] == true) {

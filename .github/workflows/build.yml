@@ -25,24 +25,36 @@ jobs:
           channel: 'stable'
           cache: true
 
-      # إنشاء ملفات أندرويد الأساسية إن كانت غير مكتملة
-      - name: Ensure Android Platform Exists
+      - name: Recreate Android Files
         run: flutter create . --platforms android --org com.example
 
-      # ترقية compileSdk إلى 35 و minSdk إلى 23 لحل متطلبات الحزم الجديدة
-      - name: Update Android SDK Configuration
+      # فرض compileSdk 36 و minSdk 23 على التطبيق وكافة المكتبات الخارجية
+      - name: Force Android SDK 36
         run: |
-          sed -i 's/compileSdkVersion .*/compileSdkVersion 35/g' android/app/build.gradle || true
-          sed -i 's/compileSdk = .*/compileSdk = 35/g' android/app/build.gradle || true
-          sed -i 's/targetSdkVersion .*/targetSdkVersion 35/g' android/app/build.gradle || true
-          sed -i 's/targetSdk = .*/targetSdk = 35/g' android/app/build.gradle || true
+          sed -i 's/compileSdkVersion .*/compileSdkVersion 36/g' android/app/build.gradle || true
+          sed -i 's/compileSdk = .*/compileSdk = 36/g' android/app/build.gradle || true
+          sed -i 's/targetSdkVersion .*/targetSdkVersion 36/g' android/app/build.gradle || true
+          sed -i 's/targetSdk = .*/targetSdk = 36/g' android/app/build.gradle || true
           sed -i 's/minSdkVersion .*/minSdkVersion 23/g' android/app/build.gradle || true
           sed -i 's/minSdk = .*/minSdk = 23/g' android/app/build.gradle || true
+          
+          # حقن أمر عام لإجبار كل موديول خارجي على استخدام SDK 36
+          cat << 'EOF' >> android/build.gradle
+
+          subprojects {
+              afterEvaluate { project ->
+                  if (project.hasProperty('android')) {
+                      project.android {
+                          compileSdkVersion 36
+                      }
+                  }
+              }
+          }
+          EOF
 
       - name: Install Dependencies
         run: flutter pub get
 
-      # بناء ملف الـ APK
       - name: Build APK
         run: flutter build apk --debug
 

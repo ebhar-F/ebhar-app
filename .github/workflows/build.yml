@@ -25,21 +25,19 @@ jobs:
           channel: 'stable'
           cache: true
 
-      # 1. إنشاء ملفات منصة الأندرويد
+      # إنشاء ملفات منصة أندرويد
       - name: Create Android Platform
         run: flutter create . --platforms android --org com.example
 
-      # 2. حقن إعدادات البصمة وأيقونة التطبيق في الأندرويد
-      - name: Configure Android Biometrics and Manifest
-        run: |
-          # ترقية MainActivity إلى FlutterFragmentActivity لتعمل البصمة
-          sed -i 's/import io.flutter.embedding.android.FlutterActivity/import io.flutter.embedding.android.FlutterFragmentActivity/g' android/app/src/main/kotlin/com/example/ebhar_app/MainActivity.kt || true
-          sed -i 's/class MainActivity: FlutterActivity()/class MainActivity: FlutterFragmentActivity()/g' android/app/src/main/kotlin/com/example/ebhar_app/MainActivity.kt || true
+      # تثبيت الحزم
+      - name: Install Dependencies
+        run: flutter pub get
 
-          # إضافة تصاريح البصمة والإنترنت إلى AndroidManifest.xml
-          sed -i '/<manifest/a \    <uses-permission android:name="android.permission.INTERNET"\/>\n    <uses-permission android:name="android.permission.USE_BIOMETRIC"\/>\n    <uses-permission android:name="android.permission.USE_FINGERPRINT"\/>' android/app/src/main/AndroidManifest.xml || true
+      # توليد أيقونات التطبيق للأندرويد بأمان
+      - name: Generate App Launcher Icons
+        run: dart run flutter_launcher_icons || true
 
-      # 3. ضبط إصدارات SDK
+      # ضبط التوافقية الشاملة على SDK 36 و minSdk 24
       - name: Configure Android SDK
         run: |
           sed -i 's/compileSdkVersion .*/compileSdkVersion 36/g' android/app/build.gradle || true
@@ -62,21 +60,14 @@ jobs:
           }
           EOF
 
-      - name: Install Dependencies
-        run: flutter pub get
-
-      # 4. توليد أيقونات التطبيق تلقائياً
-      - name: Generate App Launcher Icons
-        run: dart run flutter_launcher_icons
-
-      # 5. بناء ملف APK
+      # بناء ملف APK عبر Gradle
       - name: Build Android App via Gradle
         run: |
           cd android
           chmod +x gradlew
           ./gradlew assembleDebug --no-daemon
 
-      # 6. رفع ملف الـ APK
+      # رفع ملف الـ APK الناتج في Artifacts
       - name: Upload APK Artifact
         uses: actions/upload-artifact@v4
         with:

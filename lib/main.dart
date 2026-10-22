@@ -79,11 +79,6 @@ class OfflineManager {
       await prefs.setStringList(kOfflineQueueKey, list);
     }
   }
-
-  static Future<void> clear() async {
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.remove(kOfflineQueueKey);
-  }
 }
 
 // -------------------------------------------------------------
@@ -185,7 +180,10 @@ class _FullLoginScreenState extends State<FullLoginScreen> {
           await prefs.setString('saved_user', username);
           await prefs.setString('saved_pass', password);
         } else {
-          await prefs.clear();
+          // مسح بيانات الدخول فقط دون المساس بالعمليات المعلقة
+          await prefs.remove('bio_enabled');
+          await prefs.remove('saved_user');
+          await prefs.remove('saved_pass');
         }
 
         if (!mounted) return;
@@ -219,9 +217,17 @@ class _FullLoginScreenState extends State<FullLoginScreen> {
                   borderRadius: BorderRadius.circular(20),
                   child: Image.asset('assets/app_icon.png', height: 80, width: 80, fit: BoxFit.cover),
                 ),
-                const SizedBox(height: 12),
-                Image.asset('assets/logo.png', height: 65, fit: BoxFit.contain),
-                const SizedBox(height: 6),
+                const SizedBox(height: 10),
+                const Text(
+                  'إبحار',
+                  style: TextStyle(
+                    fontSize: 28,
+                    fontWeight: FontWeight.bold,
+                    color: Color(0xFF0F4C81),
+                    letterSpacing: 1.0,
+                  ),
+                ),
+                const SizedBox(height: 4),
                 const Text('منظومة الإدارة والمحاسبة الذكية', style: TextStyle(fontSize: 13, color: Colors.black54, fontWeight: FontWeight.w500)),
                 const SizedBox(height: 28),
 
@@ -319,20 +325,32 @@ class _BiometricPromptScreenState extends State<BiometricPromptScreen> {
   @override
   void initState() {
     super.initState();
-    Future.delayed(const Duration(milliseconds: 300), _authenticate);
+    Future.delayed(const Duration(milliseconds: 400), _authenticate);
   }
 
   Future<void> _authenticate() async {
     try {
+      final bool canCheck = await _auth.canCheckBiometrics || await _auth.isDeviceSupported();
+      if (!canCheck) {
+        _resetToManualLogin();
+        return;
+      }
+
       final didAuth = await _auth.authenticate(
-        localizedReason: 'المس مستشعر البصمة للمتابعة لحساب ${widget.username}',
-        options: const AuthenticationOptions(biometricOnly: false, stickyAuth: true),
+        localizedReason: 'المس مستشعر البصمة للمتابعة لمنظومة إبحار',
+        options: const AuthenticationOptions(
+          biometricOnly: false,
+          stickyAuth: true,
+          useErrorDialogs: true,
+        ),
       );
 
       if (didAuth && mounted) {
         _loginToServer();
       }
-    } catch (_) {}
+    } catch (e) {
+      debugPrint('Biometric Error: $e');
+    }
   }
 
   Future<void> _loginToServer() async {
@@ -371,7 +389,9 @@ class _BiometricPromptScreenState extends State<BiometricPromptScreen> {
 
   Future<void> _resetToManualLogin() async {
     final prefs = await SharedPreferences.getInstance();
-    await prefs.clear();
+    await prefs.remove('bio_enabled');
+    await prefs.remove('saved_user');
+    await prefs.remove('saved_pass');
     if (!mounted) return;
     Navigator.of(context).pushReplacement(
       MaterialPageRoute(builder: (context) => const FullLoginScreen()),
@@ -394,9 +414,9 @@ class _BiometricPromptScreenState extends State<BiometricPromptScreen> {
                   child: Image.asset('assets/app_icon.png', height: 70, width: 70, fit: BoxFit.cover),
                 ),
                 const SizedBox(height: 8),
-                Image.asset('assets/logo.png', height: 55, fit: BoxFit.contain),
-                const SizedBox(height: 12),
-                Text('مرحباً ${widget.username}', style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: Color(0xFF0F4C81))),
+                const Text('إبحار', style: TextStyle(fontSize: 26, fontWeight: FontWeight.bold, color: Color(0xFF0F4C81))),
+                const SizedBox(height: 8),
+                Text('مرحباً ${widget.username}', style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Colors.black87)),
                 const SizedBox(height: 4),
                 const Text('الدخول السريع عبر البصمة', style: TextStyle(color: Colors.black54)),
                 const SizedBox(height: 28),
@@ -503,7 +523,7 @@ class _MainDashboardState extends State<MainDashboard> {
           'payload': json.encode(txn),
         });
 
-        final res = await http.get(uri).timeout(const Duration(seconds: 8));
+        final res = await http.get(uri).timeout(const Duration(seconds: 12));
         final data = json.decode(res.body);
 
         if (data['ok'] == true) {
@@ -722,13 +742,24 @@ class _MainDashboardState extends State<MainDashboard> {
 
     return Scaffold(
       appBar: AppBar(
-        title: Column(
+        title: Row(
+          mainAxisSize: MainAxisSize.min,
           children: [
-            Text(_currentIndex == 0 ? 'تسجيل حركة مالية جديدة' : 'تحويل بين الحسابات', style: const TextStyle(fontSize: 17)),
-            Text('المستخدم: $userName', style: const TextStyle(fontSize: 11, color: Colors.white70)),
+            ClipRRect(
+              borderRadius: BorderRadius.circular(6),
+              child: Image.asset('assets/app_icon.png', height: 26, width: 26, fit: BoxFit.cover),
+            ),
+            const SizedBox(width: 8),
+            Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Text('إبحار', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+                Text(_currentIndex == 0 ? 'تسجيل حركة' : 'تحويل بنكي', style: const TextStyle(fontSize: 10, color: Colors.white70)),
+              ],
+            ),
           ],
         ),
-        centerTitle: true,
+        centerTitle: false,
         actions: [
           Stack(
             alignment: Alignment.center,
@@ -771,7 +802,9 @@ class _MainDashboardState extends State<MainDashboard> {
             tooltip: 'تسجيل الخروج',
             onPressed: () async {
               final prefs = await SharedPreferences.getInstance();
-              await prefs.clear();
+              await prefs.remove('bio_enabled');
+              await prefs.remove('saved_user');
+              await prefs.remove('saved_pass');
               if (!mounted) return;
               Navigator.of(context).pushReplacement(
                 MaterialPageRoute(builder: (context) => const FullLoginScreen()),
@@ -926,9 +959,6 @@ class _TransactionEntryScreenState extends State<TransactionEntryScreen> {
     return widget.categories;
   }
 
-  // -----------------------------------------------------------
-  // محلل الرسائل النصية البنكية (SMS Parser)
-  // -----------------------------------------------------------
   void _parsePastedSms(String text) {
     if (text.trim().isEmpty) return;
 
@@ -938,14 +968,12 @@ class _TransactionEntryScreenState extends State<TransactionEntryScreen> {
     String detectedType = 'مصروف';
     String detectedMethod = 'بطاقة مدى';
 
-    // 1. استخراج المبلغ
     final amtRegex = RegExp(r'[ب|بـ]\s*([0-9]+(?:\.[0-9]+)?)\s*(?:SAR)?', caseSensitive: false);
     final amtMatch = amtRegex.firstMatch(text);
     if (amtMatch != null) {
       extractedAmount = double.tryParse(amtMatch.group(1) ?? '');
     }
 
-    // 2. فحص نوع الحركة
     if (text.contains('حوالة واردة') || text.contains('إيداع') || text.contains('ايداع')) {
       detectedType = 'دخل';
       detectedMethod = 'حوالة بنكية';
@@ -960,7 +988,6 @@ class _TransactionEntryScreenState extends State<TransactionEntryScreen> {
       detectedMethod = 'بطاقة مدى';
     }
 
-    // 3. استخراج اسم التاجر / المستفيد
     if (text.contains('من ') || text.contains('من\n')) {
       final m = RegExp(r'من\s*([^\n\r\*]+)').firstMatch(text);
       if (m != null) extractedMerchant = m.group(1)?.trim();
@@ -969,7 +996,6 @@ class _TransactionEntryScreenState extends State<TransactionEntryScreen> {
       if (m != null) extractedMerchant = m.group(1)?.trim();
     }
 
-    // 4. استخراج آخر 4 أرقام للبطاقة
     final cardRegex = RegExp(r'(?:\*|\*{2})([0-9]{4})');
     final cardMatch = cardRegex.firstMatch(text);
     if (cardMatch != null) {
@@ -1011,9 +1037,6 @@ class _TransactionEntryScreenState extends State<TransactionEntryScreen> {
     );
   }
 
-  // -----------------------------------------------------------
-  // حفظ الحركة (إرسال فوري أو حفظ في طابور الأوفلاين)
-  // -----------------------------------------------------------
   Future<void> _submitData() async {
     final amt = double.tryParse(_amountController.text);
     if (amt == null || amt <= 0) {
@@ -1049,7 +1072,7 @@ class _TransactionEntryScreenState extends State<TransactionEntryScreen> {
       if (data['ok'] == true) {
         if (!mounted) return;
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(backgroundColor: Colors.teal, content: Text('تم تسجيل الحركة وإرسال الإشعار البريدي بنجاح!')),
+          const SnackBar(backgroundColor: Colors.teal, content: Text('تم تسجيل الحركة بنجاح!')),
         );
         _amountController.clear();
         _notesController.clear();

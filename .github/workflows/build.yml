@@ -1,51 +1,67 @@
-name: Build Android APK
+plugins {
+    id "com.android.application"
+    id "kotlin-android"
+    id "dev.flutter.flutter-gradle-plugin"
+}
 
-on:
-  push:
-    branches: [ "main" ]
-  workflow_dispatch:
+def localProperties = new Properties()
+def localPropertiesFile = rootProject.file('local.properties')
+if (localPropertiesFile.exists()) {
+    localPropertiesFile.withReader('UTF-8') { reader ->
+        localProperties.load(reader)
+    }
+}
 
-jobs:
-  build:
-    runs-on: ubuntu-22.04
+def flutterVersionCode = localProperties.getProperty('flutter.versionCode')
+if (flutterVersionCode == null) {
+    flutterVersionCode = '1'
+}
 
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
+def flutterVersionName = localProperties.getProperty('flutter.versionName')
+if (flutterVersionName == null) {
+    flutterVersionName = '1.0'
+}
 
-      - name: Set up Java
-        uses: actions/setup-java@v4
-        with:
-          distribution: 'temurin'
-          java-version: '17'
+android {
+    namespace "com.example.ebhar_app"
+    compileSdkVersion 34
+    ndkVersion flutter.ndkVersion
 
-      - name: Set up Flutter
-        uses: subosito/flutter-action@v2
-        with:
-          channel: 'stable'
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_1_8
+        targetCompatibility JavaVersion.VERSION_1_8
+    }
 
-      - name: Setup Android Project & Permissions
-        run: |
-          flutter create --org com.ebhar.app --project-name ebhar_app .
-          sed -i 's/android:label="ebhar_app"/android:label="إبحار"/g' android/app/src/main/AndroidManifest.xml || true
-          sed -i 's/minSdkVersion flutter.minSdkVersion/minSdkVersion 23/g' android/app/build.gradle || true
-          sed -i 's/minSdk = flutter.minSdkVersion/minSdk = 23/g' android/app/build.gradle || true
-          sed -i 's/io.flutter.embedding.android.FlutterActivity/io.flutter.embedding.android.FlutterFragmentActivity/g' android/app/src/main/AndroidManifest.xml || true
-          find android/ -name "MainActivity.*" -exec sed -i 's/FlutterActivity/FlutterFragmentActivity/g' {} + || true
-          sed -i '/<application/i <uses-permission android:name="android.permission.USE_BIOMETRIC"\/>' android/app/src/main/AndroidManifest.xml
-          sed -i '/<application/i <uses-permission android:name="android.permission.USE_FINGERPRINT"\/>' android/app/src/main/AndroidManifest.xml
+    kotlinOptions {
+        jvmTarget = '1.8'
+    }
 
-      - name: Get packages
-        run: flutter pub get
+    sourceSets {
+        main.java.srcDirs += 'src/main/kotlin'
+    }
 
-      - name: Generate App Icons
-        run: dart run flutter_launcher_icons
+    defaultConfig {
+        applicationId "com.example.ebhar_app"
+        minSdkVersion 21
+        targetSdkVersion 34
+        versionCode flutterVersionCode.toInteger()
+        versionName flutterVersionName
+        multiDexEnabled true
+    }
 
-      - name: Build APK
-        run: flutter build apk --debug
+    buildTypes {
+        release {
+            signingConfig signingConfigs.debug
+            minifyEnabled false
+            shrinkResources false
+        }
+    }
+}
 
-      - name: Upload Artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: ebhar-app-debug
-          path: build/app/outputs/flutter-apk/app-debug.apk
+flutter {
+    source '../..'
+}
+
+dependencies {
+    implementation "androidx.multidex:multidex:2.0.1"
+}

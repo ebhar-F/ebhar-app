@@ -358,7 +358,6 @@ class _BiometricPromptScreenState extends State<BiometricPromptScreen> {
         _resetToManualLogin();
       }
     } catch (_) {
-      // عند تعذر الاتصال: السماح بالدخول لتمكين التسجيل Offline
       if (!mounted) return;
       Navigator.of(context).pushReplacement(
         MaterialPageRoute(
@@ -655,7 +654,6 @@ class _MainDashboardState extends State<MainDashboard> {
         }
       }
     } catch (_) {
-      // قراءة البيانات من الكاش المحلي في حال انقطاع الشبكة
       final cachedStr = prefs.getString('cached_initial_data');
       if (cachedStr != null) {
         final data = json.decode(cachedStr);
@@ -732,7 +730,6 @@ class _MainDashboardState extends State<MainDashboard> {
         ),
         centerTitle: true,
         actions: [
-          // شارة وخانة المهام المعلقة
           Stack(
             alignment: Alignment.center,
             children: [
@@ -796,7 +793,6 @@ class _MainDashboardState extends State<MainDashboard> {
             )
           : Column(
               children: [
-                // شريط تنبيه إذا وُجدت مهام تنتظر الإرسال
                 if (_pendingCount > 0)
                   InkWell(
                     onTap: _showPendingQueueSheet,
@@ -942,7 +938,7 @@ class _TransactionEntryScreenState extends State<TransactionEntryScreen> {
     String detectedType = 'مصروف';
     String detectedMethod = 'بطاقة مدى';
 
-    // 1. استخراج المبلغ (يدعم بـ4.00 SAR أو بـ12 أو ب57 SAR)
+    // 1. استخراج المبلغ
     final amtRegex = RegExp(r'[ب|بـ]\s*([0-9]+(?:\.[0-9]+)?)\s*(?:SAR)?', caseSensitive: false);
     final amtMatch = amtRegex.firstMatch(text);
     if (amtMatch != null) {
@@ -973,7 +969,7 @@ class _TransactionEntryScreenState extends State<TransactionEntryScreen> {
       if (m != null) extractedMerchant = m.group(1)?.trim();
     }
 
-    // 4. استخراج آخر 4 أرقام للبطاقة (مثل **9074 أو *1897 أو من4410*)
+    // 4. استخراج آخر 4 أرقام للبطاقة
     final cardRegex = RegExp(r'(?:\*|\*{2})([0-9]{4})');
     final cardMatch = cardRegex.firstMatch(text);
     if (cardMatch != null) {
@@ -993,7 +989,6 @@ class _TransactionEntryScreenState extends State<TransactionEntryScreen> {
       _movementType = detectedType;
       _paymentMethod = detectedMethod;
 
-      // مطابقة البطاقة والحساب المسجل تلقائياً
       if (matchedCardLast4 != null && widget.cards.isNotEmpty) {
         final foundCard = widget.cards.firstWhere(
           (c) => c['last4'].toString() == matchedCardLast4,
@@ -1063,7 +1058,6 @@ class _TransactionEntryScreenState extends State<TransactionEntryScreen> {
         throw Exception(data['error']);
       }
     } on SocketException catch (_) {
-      // انقطاع الإنترنت: حفظ محلي
       await OfflineManager.enqueue(payload);
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
@@ -1076,7 +1070,6 @@ class _TransactionEntryScreenState extends State<TransactionEntryScreen> {
       _notesController.clear();
       widget.onOfflineSaved();
     } catch (e) {
-      // أي خطأ مهلة اتصال أو استثناء شبكة
       await OfflineManager.enqueue(payload);
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
@@ -1102,7 +1095,6 @@ class _TransactionEntryScreenState extends State<TransactionEntryScreen> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          // زر اللصق الذكي للرسائل البنكية
           OutlinedButton.icon(
             style: OutlinedButton.styleFrom(
               padding: const EdgeInsets.symmetric(vertical: 10),

@@ -55,7 +55,7 @@ class EbharApp extends StatelessWidget {
 }
 
 // -------------------------------------------------------------
-// إدارة طابور الحركات غير المرسلة (Offline Queue Manager)
+// إدارة طابور الحركات غير المرسلة
 // -------------------------------------------------------------
 class OfflineManager {
   static Future<List<Map<String, dynamic>>> getQueue() async {
@@ -82,7 +82,110 @@ class OfflineManager {
 }
 
 // -------------------------------------------------------------
-// بوابة الفحص: تحديد مسار الدخول
+// محرك حوكمة وتحليل الرسائل البنكية الذكي (Smart Bank SMS Parser)
+// -------------------------------------------------------------
+class ParsedBankResult {
+  final double? amount;
+  final String description;
+  final String movementType;
+  final String paymentMethod;
+  final String? cardLast4;
+
+  ParsedBankResult({
+    this.amount,
+    required this.description,
+    required this.movementType,
+    required this.paymentMethod,
+    this.cardLast4,
+  });
+}
+
+class BankSmsGovernanceParser {
+  static ParsedBankResult parse(String sms) {
+    final text = sms.trim();
+    double? amount;
+    String desc = '';
+    String mType = 'مصروف';
+    String pMethod = 'بطاقة مدى';
+    String? last4;
+
+    // 1. استخراج المبلغ بمرونة عالية لجميع صيغ البنوك
+    final amtRegexes = [
+      RegExp(r'(?:بـ|ب|بقيمة|مبلغ|بمبلغ)\s*([0-9]+(?:\.[0-9]+)?)\s*(?:SAR|ر\.س)?', caseSensitive: false),
+      RegExp(r'([0-9]+(?:\.[0-9]+)?)\s*(?:SAR|ر\.س)', caseSensitive: false),
+    ];
+    for (var reg in amtRegexes) {
+      final match = reg.firstMatch(text);
+      if (match != null) {
+        amount = double.tryParse(match.group(1) ?? '');
+        if (amount != null && amount > 0) break;
+      }
+    }
+
+    // 2. تحديد نوع الحركة وطريقة الدفع
+    if (text.contains('حوالة واردة') || text.contains('إيداع') || text.contains('ايداع')) {
+      mType = 'دخل';
+      pMethod = 'حوالة بنكية';
+    } else if (text.contains('حوالة صادرة') || text.contains('تحويل')) {
+      mType = 'مصروف';
+      pMethod = 'حوالة بنكية';
+    } else if (text.contains('إئتمانية') || text.contains('ائتمانية')) {
+      mType = 'مصروف';
+      pMethod = 'بطاقة ائتمانية';
+    } else if (text.contains('مدى') || text.contains('شراء-POS') || text.contains('نقطة بيع')) {
+      mType = 'مصروف';
+      pMethod = 'بطاقة مدى';
+    }
+
+    // 3. استخراج اسم المتجر أو الطرف الثاني بدقة
+    final lines = text.split(RegExp(r'[\r\n]+'));
+    for (var line in lines) {
+      final trimmedLine = line.trim();
+      if (trimmedLine.startsWith('من ') || trimmedLine.startsWith('من\t')) {
+        desc = trimmedLine.replaceFirst(RegExp(r'^من\s*'), '').trim();
+        break;
+      } else if (trimmedLine.startsWith('لـ') || trimmedLine.startsWith('ل ')) {
+        desc = trimmedLine.replaceFirst(RegExp(r'^(?:لـ|ل)\s*'), '').trim();
+        break;
+      } else if (trimmedLine.startsWith('لدى ')) {
+        desc = trimmedLine.replaceFirst(RegExp(r'^لدى\s*'), '').trim();
+        break;
+      }
+    }
+
+    // إذا لم يكن في سطر منفصل، ابحث عبر Regex
+    if (desc.isEmpty) {
+      final descMatch = RegExp(r'(?:لدى|من|لـ|ل)\s*([^\n\r\*]+)').firstMatch(text);
+      if (descMatch != null) {
+        desc = descMatch.group(1)?.trim() ?? '';
+      }
+    }
+
+    // تنظيف اسم المتجر/المستفيد من الأرقام والرموز
+    desc = desc.replaceAll(RegExp(r'(\d{4}\*|\*\d{4}|\*|SAR|ر\.س|في|بتاريخ|الساعة|إئتمانية|مدى).*', caseSensitive: false), '').trim();
+
+    // 4. استخراج آخر 4 أرقام من البطاقة أو الحساب
+    final cardMatch1 = RegExp(r'(?:\*|\*{2})([0-9]{4})').firstMatch(text);
+    final cardMatch2 = RegExp(r'([0-9]{4})\*').firstMatch(text);
+
+    if (cardMatch1 != null) {
+      last4 = cardMatch1.group(1);
+    } else if (cardMatch2 != null) {
+      last4 = cardMatch2.group(1);
+    }
+
+    return ParsedBankResult(
+      amount: amount,
+      description: desc,
+      movementType: mType,
+      paymentMethod: pMethod,
+      cardLast4: last4,
+    );
+  }
+}
+
+// -------------------------------------------------------------
+// بوابة الدخول وفحص البصمة
 // -------------------------------------------------------------
 class AuthGatekeeper extends StatefulWidget {
   const AuthGatekeeper({super.key});
@@ -180,7 +283,6 @@ class _FullLoginScreenState extends State<FullLoginScreen> {
           await prefs.setString('saved_user', username);
           await prefs.setString('saved_pass', password);
         } else {
-          // مسح بيانات الدخول فقط دون المساس بالعمليات المعلقة
           await prefs.remove('bio_enabled');
           await prefs.remove('saved_user');
           await prefs.remove('saved_pass');
@@ -220,12 +322,7 @@ class _FullLoginScreenState extends State<FullLoginScreen> {
                 const SizedBox(height: 10),
                 const Text(
                   'إبحار',
-                  style: TextStyle(
-                    fontSize: 28,
-                    fontWeight: FontWeight.bold,
-                    color: Color(0xFF0F4C81),
-                    letterSpacing: 1.0,
-                  ),
+                  style: TextStyle(fontSize: 28, fontWeight: FontWeight.bold, color: Color(0xFF0F4C81)),
                 ),
                 const SizedBox(height: 4),
                 const Text('منظومة الإدارة والمحاسبة الذكية', style: TextStyle(fontSize: 13, color: Colors.black54, fontWeight: FontWeight.w500)),
@@ -325,7 +422,7 @@ class _BiometricPromptScreenState extends State<BiometricPromptScreen> {
   @override
   void initState() {
     super.initState();
-    Future.delayed(const Duration(milliseconds: 400), _authenticate);
+    Future.delayed(const Duration(milliseconds: 300), _authenticate);
   }
 
   Future<void> _authenticate() async {
@@ -337,7 +434,7 @@ class _BiometricPromptScreenState extends State<BiometricPromptScreen> {
       }
 
       final didAuth = await _auth.authenticate(
-        localizedReason: 'المس مستشعر البصمة للمتابعة لمنظومة إبحار',
+        localizedReason: 'المس مستشعر البصمة للمتابعة لحساب ${widget.username}',
         options: const AuthenticationOptions(
           biometricOnly: false,
           stickyAuth: true,
@@ -348,9 +445,7 @@ class _BiometricPromptScreenState extends State<BiometricPromptScreen> {
       if (didAuth && mounted) {
         _loginToServer();
       }
-    } catch (e) {
-      debugPrint('Biometric Error: $e');
-    }
+    } catch (_) {}
   }
 
   Future<void> _loginToServer() async {
@@ -376,6 +471,7 @@ class _BiometricPromptScreenState extends State<BiometricPromptScreen> {
         _resetToManualLogin();
       }
     } catch (_) {
+      // السماح بالدخول في وضع عدم الاتصال
       if (!mounted) return;
       Navigator.of(context).pushReplacement(
         MaterialPageRoute(
@@ -455,7 +551,7 @@ class _BiometricPromptScreenState extends State<BiometricPromptScreen> {
 }
 
 // -------------------------------------------------------------
-// 3. الشاشة الرئيسية المشتركة مع مراقبة المزامنة
+// 3. الشاشة الرئيسية المشتركة مع المزامنة التلقائية اللحظية
 // -------------------------------------------------------------
 class MainDashboard extends StatefulWidget {
   final Map<String, dynamic> currentUser;
@@ -471,6 +567,7 @@ class _MainDashboardState extends State<MainDashboard> {
   int _pendingCount = 0;
   bool _isSyncing = false;
   StreamSubscription<ConnectivityResult>? _connSub;
+  Timer? _autoSyncTimer;
 
   List<Map<String, String>> _accountsList = [];
   List<Map<String, dynamic>> _cardsList = [];
@@ -483,18 +580,28 @@ class _MainDashboardState extends State<MainDashboard> {
     super.initState();
     _fetchSystemData();
     _updatePendingCount();
-    _listenConnectivity();
+    _setupAutoSync();
   }
 
   @override
   void dispose() {
     _connSub?.cancel();
+    _autoSyncTimer?.cancel();
     super.dispose();
   }
 
-  void _listenConnectivity() {
+  // إعداد المزامنة التلقائية التامة عند توفر الشبكة
+  void _setupAutoSync() {
     _connSub = Connectivity().onConnectivityChanged.listen((result) {
-      if (result != ConnectivityResult.none && _pendingCount > 0 && !_isSyncing) {
+      if (result != ConnectivityResult.none) {
+        _syncAllPending();
+      }
+    });
+
+    // مؤقت فحص دوري كل 15 ثانية للتأكد من رفع أي عملية معلقة تلقائياً
+    _autoSyncTimer = Timer.periodic(const Duration(seconds: 15), (_) async {
+      final queue = await OfflineManager.getQueue();
+      if (queue.isNotEmpty && !_isSyncing) {
         _syncAllPending();
       }
     });
@@ -523,7 +630,7 @@ class _MainDashboardState extends State<MainDashboard> {
           'payload': json.encode(txn),
         });
 
-        final res = await http.get(uri).timeout(const Duration(seconds: 12));
+        final res = await http.get(uri).timeout(const Duration(seconds: 10));
         final data = json.decode(res.body);
 
         if (data['ok'] == true) {
@@ -549,7 +656,7 @@ class _MainDashboardState extends State<MainDashboard> {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             backgroundColor: Colors.teal,
-            content: Text('تمت مزامنة $sentCount حركة وإرسال الإشعارات البريدية بنجاح!'),
+            content: Text('تمت مزامنة $sentCount حركة تلقائياً وإرسال الإشعار البريدي!'),
           ),
         );
         _fetchSystemData();
@@ -891,7 +998,7 @@ class _MainDashboardState extends State<MainDashboard> {
 }
 
 // -------------------------------------------------------------
-// 4. شاشة تسجيل حركة مع ميزة اللصق الذكي والمزامنة دون اتصال
+// 4. شاشة تسجيل حركة مع ميزة اللصق الذكي وحوكمة الحقول
 // -------------------------------------------------------------
 class TransactionEntryScreen extends StatefulWidget {
   final String currentUser;
@@ -959,80 +1066,78 @@ class _TransactionEntryScreenState extends State<TransactionEntryScreen> {
     return widget.categories;
   }
 
-  void _parsePastedSms(String text) {
+  void _applyPastedSms(String text) {
     if (text.trim().isEmpty) return;
 
-    double? extractedAmount;
-    String? extractedMerchant;
-    String? matchedCardLast4;
-    String detectedType = 'مصروف';
-    String detectedMethod = 'بطاقة مدى';
+    final result = BankSmsGovernanceParser.parse(text);
 
-    final amtRegex = RegExp(r'[ب|بـ]\s*([0-9]+(?:\.[0-9]+)?)\s*(?:SAR)?', caseSensitive: false);
-    final amtMatch = amtRegex.firstMatch(text);
-    if (amtMatch != null) {
-      extractedAmount = double.tryParse(amtMatch.group(1) ?? '');
-    }
-
-    if (text.contains('حوالة واردة') || text.contains('إيداع') || text.contains('ايداع')) {
-      detectedType = 'دخل';
-      detectedMethod = 'حوالة بنكية';
-    } else if (text.contains('حوالة صادرة')) {
-      detectedType = 'مصروف';
-      detectedMethod = 'حوالة بنكية';
-    } else if (text.contains('إئتمانية') || text.contains('ائتمانية')) {
-      detectedType = 'مصروف';
-      detectedMethod = 'بطاقة ائتمانية';
-    } else if (text.contains('مدى')) {
-      detectedType = 'مصروف';
-      detectedMethod = 'بطاقة مدى';
-    }
-
-    if (text.contains('من ') || text.contains('من\n')) {
-      final m = RegExp(r'من\s*([^\n\r\*]+)').firstMatch(text);
-      if (m != null) extractedMerchant = m.group(1)?.trim();
-    } else if (text.contains('لـ') || text.contains('ل ')) {
-      final m = RegExp(r'[ل|لـ]\s*([^\n\r\*]+)').firstMatch(text);
-      if (m != null) extractedMerchant = m.group(1)?.trim();
-    }
-
-    final cardRegex = RegExp(r'(?:\*|\*{2})([0-9]{4})');
-    final cardMatch = cardRegex.firstMatch(text);
-    if (cardMatch != null) {
-      matchedCardLast4 = cardMatch.group(1);
-    } else {
-      final altCardMatch = RegExp(r'([0-9]{4})\*').firstMatch(text);
-      if (altCardMatch != null) matchedCardLast4 = altCardMatch.group(1);
+    // التحقق من الحوكمة وتحديد البند المقترح
+    String? matchedCategory;
+    if (result.description.isNotEmpty && widget.categories.isNotEmpty) {
+      final descUpper = result.description.toUpperCase();
+      for (var cat in widget.categories) {
+        final catName = (cat['name'] ?? '').toUpperCase();
+        if ((descUpper.contains('GRO') || descUpper.contains('أسواق') || descUpper.contains('تموينات') || descUpper.contains('بنده')) &&
+            (catName.contains('معيشة') || catName.contains('تموينات') || catName.contains('فضل'))) {
+          matchedCategory = cat['id'];
+          break;
+        } else if ((descUpper.contains('GAS') || descUpper.contains('محطة') || descUpper.contains('وقود')) &&
+            (catName.contains('سيارة') || catName.contains('وقود'))) {
+          matchedCategory = cat['id'];
+          break;
+        } else if ((text.contains('ايمان') || text.contains('بنات')) &&
+            (catName.contains('أولاد') || catName.contains('اولاد') || catName.contains('بنات'))) {
+          matchedCategory = cat['id'];
+          break;
+        }
+      }
     }
 
     setState(() {
-      if (extractedAmount != null) {
-        _amountController.text = extractedAmount.toString();
+      if (result.amount != null) {
+        _amountController.text = result.amount.toString();
       }
-      if (extractedMerchant != null && extractedMerchant.isNotEmpty) {
-        _notesController.text = extractedMerchant;
+      if (result.description.isNotEmpty) {
+        _notesController.text = result.description;
       }
-      _movementType = detectedType;
-      _paymentMethod = detectedMethod;
+      _movementType = result.movementType;
+      _paymentMethod = result.paymentMethod;
 
-      if (matchedCardLast4 != null && widget.cards.isNotEmpty) {
+      // مطابقة البطاقة والحساب البنكي التابع لها فورياً
+      if (result.cardLast4 != null && widget.cards.isNotEmpty) {
         final foundCard = widget.cards.firstWhere(
-          (c) => c['last4'].toString() == matchedCardLast4,
+          (c) => c['last4'].toString().trim() == result.cardLast4!.trim() ||
+                 c['name'].toString().contains(result.cardLast4!),
           orElse: () => {},
         );
+
         if (foundCard.isNotEmpty) {
           _selectedCardId = foundCard['id'].toString();
-          if (foundCard['account_id'] != null) {
+          if (foundCard['account_id'] != null && foundCard['account_id'].toString().isNotEmpty) {
             _selectedAccountId = foundCard['account_id'].toString();
           }
         }
       }
+
+      // إذا لم يتحدد الحساب من البطاقة، اختر أول حساب تلقائياً
+      if (_selectedAccountId == null && widget.accounts.isNotEmpty) {
+        _selectedAccountId = widget.accounts.first['id'];
+      }
+
+      // تطبيق البند المقترح
+      if (matchedCategory != null) {
+        _selectedCategoryId = matchedCategory;
+      }
     });
 
     ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(
+      SnackBar(
         backgroundColor: Colors.teal,
-        content: Text('تم تحليل بيانات الرسالة وتعبئة الخانات بنجاح! يرجى اختيار البند.'),
+        content: Text(
+          result.amount != null
+              ? 'تم استخراج البيانات: ${result.amount} ر.س | ${result.description}'
+              : 'تم استخراج وتعبئة الخانات المكتشفة بنجاح.',
+        ),
       ),
     );
   }
@@ -1072,7 +1177,7 @@ class _TransactionEntryScreenState extends State<TransactionEntryScreen> {
       if (data['ok'] == true) {
         if (!mounted) return;
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(backgroundColor: Colors.teal, content: Text('تم تسجيل الحركة بنجاح!')),
+          const SnackBar(backgroundColor: Colors.teal, content: Text('تم تسجيل الحركة وإرسال الإشعار البريدي بنجاح!')),
         );
         _amountController.clear();
         _notesController.clear();
@@ -1086,7 +1191,7 @@ class _TransactionEntryScreenState extends State<TransactionEntryScreen> {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
           backgroundColor: Colors.orange,
-          content: Text('لا يوجد اتصال بالإنترنت. تم حفظ الحركة محلياً وسيتم إرسالها تلقائياً فور توفر الشبكة 💾'),
+          content: Text('لا يوجد اتصال بالإنترنت. تم حفظ الحركة محلياً وستُرسل تلقائياً فور توفر الشبكة 💾'),
         ),
       );
       _amountController.clear();
@@ -1129,7 +1234,7 @@ class _TransactionEntryScreenState extends State<TransactionEntryScreen> {
             onPressed: () async {
               final data = await Clipboard.getData(Clipboard.kTextPlain);
               if (data != null && data.text != null) {
-                _parsePastedSms(data.text!);
+                _applyPastedSms(data.text!);
               } else {
                 if (!mounted) return;
                 ScaffoldMessenger.of(context).showSnackBar(

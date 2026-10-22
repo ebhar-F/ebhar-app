@@ -25,22 +25,24 @@ jobs:
           channel: 'stable'
           cache: true
 
-      # إنشاء ملفات أندرويد الأساسية في حال كانت ناقصة
+      # إنشاء ملفات أندرويد الأساسية إن كانت غير مكتملة
       - name: Ensure Android Platform Exists
         run: flutter create . --platforms android --org com.example
 
-      # ترقية وضبط إصدارات الـ SDK المتوافقة مع البصمة وشبكة الاتصال
-      - name: Set Android SDK Versions
+      # ترقية compileSdk إلى 35 و minSdk إلى 23 لحل متطلبات الحزم الجديدة
+      - name: Update Android SDK Configuration
         run: |
-          sed -i 's/minSdkVersion flutter.minSdkVersion/minSdkVersion 23/g' android/app/build.gradle || true
-          sed -i 's/minSdkVersion 21/minSdkVersion 23/g' android/app/build.gradle || true
-          sed -i 's/compileSdkVersion flutter.compileSdkVersion/compileSdkVersion 34/g' android/app/build.gradle || true
-          sed -i 's/targetSdkVersion flutter.targetSdkVersion/targetSdkVersion 34/g' android/app/build.gradle || true
+          sed -i 's/compileSdkVersion .*/compileSdkVersion 35/g' android/app/build.gradle || true
+          sed -i 's/compileSdk = .*/compileSdk = 35/g' android/app/build.gradle || true
+          sed -i 's/targetSdkVersion .*/targetSdkVersion 35/g' android/app/build.gradle || true
+          sed -i 's/targetSdk = .*/targetSdk = 35/g' android/app/build.gradle || true
+          sed -i 's/minSdkVersion .*/minSdkVersion 23/g' android/app/build.gradle || true
+          sed -i 's/minSdk = .*/minSdk = 23/g' android/app/build.gradle || true
 
       - name: Install Dependencies
         run: flutter pub get
 
-      # بناء ملف APK وتفعيل Multidex لحل مشاكل تضارب المكتبات
+      # بناء ملف الـ APK
       - name: Build APK
         run: flutter build apk --debug
 

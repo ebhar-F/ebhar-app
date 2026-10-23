@@ -1150,7 +1150,7 @@ class _TransactionEntryScreenState extends State<TransactionEntryScreen> {
       "category_id": _selectedTempMapId == null ? (_selectedCategoryId ?? "") : "",
       "temp_map_id": _selectedTempMapId ?? "",
       "temp_subcat_id": _selectedTempMapId != null ? (_selectedCategoryId ?? "") : "",
-      "user": widget.currentUser
+      "user": "${widget.currentUser} (تطبيق)"
     };
 
     try {

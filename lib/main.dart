@@ -153,7 +153,6 @@ class BankSmsGovernanceParser {
       }
     }
 
-    // إذا لم يكن في سطر منفصل، ابحث عبر Regex
     if (desc.isEmpty) {
       final descMatch = RegExp(r'(?:لدى|من|لـ|ل)\s*([^\n\r\*]+)').firstMatch(text);
       if (descMatch != null) {
@@ -471,7 +470,6 @@ class _BiometricPromptScreenState extends State<BiometricPromptScreen> {
         _resetToManualLogin();
       }
     } catch (_) {
-      // السماح بالدخول في وضع عدم الاتصال
       if (!mounted) return;
       Navigator.of(context).pushReplacement(
         MaterialPageRoute(
@@ -503,7 +501,7 @@ class _BiometricPromptScreenState extends State<BiometricPromptScreen> {
           child: Padding(
             padding: const EdgeInsets.symmetric(horizontal: 26),
             child: Column(
-              mainAxisAlignment: MainAxisAlignment.center,
+              mainAxisAlignment: Center(child: null) == null ? MainAxisAlignment.center : MainAxisAlignment.start,
               children: [
                 ClipRRect(
                   borderRadius: BorderRadius.circular(16),
@@ -590,7 +588,6 @@ class _MainDashboardState extends State<MainDashboard> {
     super.dispose();
   }
 
-  // إعداد المزامنة التلقائية التامة عند توفر الشبكة
   void _setupAutoSync() {
     _connSub = Connectivity().onConnectivityChanged.listen((result) {
       if (result != ConnectivityResult.none) {
@@ -598,7 +595,6 @@ class _MainDashboardState extends State<MainDashboard> {
       }
     });
 
-    // مؤقت فحص دوري كل 15 ثانية للتأكد من رفع أي عملية معلقة تلقائياً
     _autoSyncTimer = Timer.periodic(const Duration(seconds: 15), (_) async {
       final queue = await OfflineManager.getQueue();
       if (queue.isNotEmpty && !_isSyncing) {
@@ -614,53 +610,49 @@ class _MainDashboardState extends State<MainDashboard> {
     }
   }
 
+  // -----------------------------------------------------------
+  // دالة المزامنة المحدثة: إرسال كل الحركات دفعة واحدة لتوليد تقرير مجمع
+  // -----------------------------------------------------------
   Future<void> _syncAllPending() async {
     if (_isSyncing) return;
     final queue = await OfflineManager.getQueue();
     if (queue.isEmpty) return;
 
     setState(() => _isSyncing = true);
-    int sentCount = 0;
-    List<Map<String, dynamic>> failed = [];
 
-    for (var txn in queue) {
-      try {
-        final uri = Uri.parse(kBackendUrl).replace(queryParameters: {
-          'action': 'saveTransaction',
-          'payload': json.encode(txn),
-        });
-
-        final res = await http.get(uri).timeout(const Duration(seconds: 10));
-        final data = json.decode(res.body);
-
-        if (data['ok'] == true) {
-          sentCount++;
-        } else {
-          failed.add(txn);
-        }
-      } catch (_) {
-        failed.add(txn);
-      }
-    }
-
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.setStringList(kOfflineQueueKey, failed.map((f) => json.encode(f)).toList());
-
-    if (mounted) {
-      setState(() {
-        _pendingCount = failed.length;
-        _isSyncing = false;
+    try {
+      final uri = Uri.parse(kBackendUrl).replace(queryParameters: {
+        'action': 'saveBatchTransactions',
+        'payload': json.encode(queue),
       });
 
-      if (sentCount > 0) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            backgroundColor: Colors.teal,
-            content: Text('تمت مزامنة $sentCount حركة تلقائياً وإرسال الإشعار البريدي!'),
-          ),
-        );
-        _fetchSystemData();
+      final res = await http.get(uri).timeout(const Duration(seconds: 15));
+      final data = json.decode(res.body);
+
+      if (data['ok'] == true) {
+        final count = queue.length;
+        final prefs = await SharedPreferences.getInstance();
+        await prefs.remove(kOfflineQueueKey);
+
+        if (mounted) {
+          setState(() {
+            _pendingCount = 0;
+            _isSyncing = false;
+          });
+
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              backgroundColor: Colors.teal,
+              content: Text('تمت مزامنة $count حركات معاً وتوليد التقرير المجمّع بنجاح! 🎉'),
+            ),
+          );
+          _fetchSystemData();
+        }
+      } else {
+        throw Exception(data['error']);
       }
+    } catch (_) {
+      if (mounted) setState(() => _isSyncing = false);
     }
   }
 
@@ -1071,7 +1063,6 @@ class _TransactionEntryScreenState extends State<TransactionEntryScreen> {
 
     final result = BankSmsGovernanceParser.parse(text);
 
-    // التحقق من الحوكمة وتحديد البند المقترح
     String? matchedCategory;
     if (result.description.isNotEmpty && widget.categories.isNotEmpty) {
       final descUpper = result.description.toUpperCase();
@@ -1103,7 +1094,6 @@ class _TransactionEntryScreenState extends State<TransactionEntryScreen> {
       _movementType = result.movementType;
       _paymentMethod = result.paymentMethod;
 
-      // مطابقة البطاقة والحساب البنكي التابع لها فورياً
       if (result.cardLast4 != null && widget.cards.isNotEmpty) {
         final foundCard = widget.cards.firstWhere(
           (c) => c['last4'].toString().trim() == result.cardLast4!.trim() ||
@@ -1119,12 +1109,10 @@ class _TransactionEntryScreenState extends State<TransactionEntryScreen> {
         }
       }
 
-      // إذا لم يتحدد الحساب من البطاقة، اختر أول حساب تلقائياً
       if (_selectedAccountId == null && widget.accounts.isNotEmpty) {
         _selectedAccountId = widget.accounts.first['id'];
       }
 
-      // تطبيق البند المقترح
       if (matchedCategory != null) {
         _selectedCategoryId = matchedCategory;
       }

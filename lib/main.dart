@@ -501,7 +501,7 @@ class _BiometricPromptScreenState extends State<BiometricPromptScreen> {
           child: Padding(
             padding: const EdgeInsets.symmetric(horizontal: 26),
             child: Column(
-              mainAxisAlignment: Center(child: null) == null ? MainAxisAlignment.center : MainAxisAlignment.start,
+              mainAxisAlignment: MainAxisAlignment.center,
               children: [
                 ClipRRect(
                   borderRadius: BorderRadius.circular(16),
@@ -610,9 +610,6 @@ class _MainDashboardState extends State<MainDashboard> {
     }
   }
 
-  // -----------------------------------------------------------
-  // دالة المزامنة المحدثة: إرسال كل الحركات دفعة واحدة لتوليد تقرير مجمع
-  // -----------------------------------------------------------
   Future<void> _syncAllPending() async {
     if (_isSyncing) return;
     final queue = await OfflineManager.getQueue();
@@ -715,7 +712,7 @@ class _MainDashboardState extends State<MainDashboard> {
                               child: const Icon(Icons.wifi_off, color: Colors.orange, size: 20),
                             ),
                             title: Text(item['description']?.toString().isNotEmpty == true ? item['description'] : 'بدون بيان', style: const TextStyle(fontWeight: FontWeight.bold)),
-                            subtitle: Text('${item['date']} | ${item['payment_method']}'),
+                            subtitle: Text('${item['date']} | ${item['type'] ?? 'مصروف'} | ${item['payment_method']}'),
                             trailing: Row(
                               mainAxisSize: MainAxisSize.min,
                               children: [
@@ -990,7 +987,7 @@ class _MainDashboardState extends State<MainDashboard> {
 }
 
 // -------------------------------------------------------------
-// 4. شاشة تسجيل حركة مع ميزة اللصق الذكي وحوكمة الحقول
+// 4. شاشة تسجيل حركة مع ميزة اللصق الذكي وحوكمة الحقول ودعم الدين
 // -------------------------------------------------------------
 class TransactionEntryScreen extends StatefulWidget {
   final String currentUser;
@@ -1024,14 +1021,18 @@ class _TransactionEntryScreenState extends State<TransactionEntryScreen> {
   DateTime _selectedDate = DateTime.now();
   bool _isSaving = false;
 
-  String _movementType = 'مصروف';
+  String _movementType = 'مصروف'; // 'مصروف' | 'دخل' | 'دين_على_الغير'
   String _paymentMethod = 'بطاقة مدى';
   String? _selectedTempMapId;
   String? _selectedCategoryId;
   String? _selectedAccountId;
   String? _selectedCardId;
 
-  final List<String> _movementTypes = ['مصروف', 'دخل'];
+  final List<Map<String, String>> _movementTypes = [
+    {'value': 'مصروف', 'label': 'مصروف'},
+    {'value': 'دخل', 'label': 'دخل'},
+    {'value': 'دين_على_الغير', 'label': 'دين / ذمة'},
+  ];
   final List<String> _paymentMethods = ['بطاقة مدى', 'بطاقة ائتمانية', 'حوالة بنكية', 'نقدي (كاش)'];
 
   InputDecoration _fieldStyle(String label) {
@@ -1063,8 +1064,9 @@ class _TransactionEntryScreenState extends State<TransactionEntryScreen> {
 
     final result = BankSmsGovernanceParser.parse(text);
 
+    // البحث الذكي عن التصنيف إذا لم تكن الحركة ديناً
     String? matchedCategory;
-    if (result.description.isNotEmpty && widget.categories.isNotEmpty) {
+    if (_movementType != 'دين_على_الغير' && result.description.isNotEmpty && widget.categories.isNotEmpty) {
       final descUpper = result.description.toUpperCase();
       for (var cat in widget.categories) {
         final catName = (cat['name'] ?? '').toUpperCase();
@@ -1091,9 +1093,14 @@ class _TransactionEntryScreenState extends State<TransactionEntryScreen> {
       if (result.description.isNotEmpty) {
         _notesController.text = result.description;
       }
-      _movementType = result.movementType;
+      
+      // إذا كان المستخدم قد حدد نوع "دين_على_الغير" يدوياً نحافظ عليه، وإلا نعتمد على نتيجة التحليل
+      if (_movementType != 'دين_على_الغير') {
+        _movementType = result.movementType;
+      }
       _paymentMethod = result.paymentMethod;
 
+      // مطابقة عامة وديناميكية لأي بطاقة مسجلة عبر آخر 4 أرقام
       if (result.cardLast4 != null && widget.cards.isNotEmpty) {
         final foundCard = widget.cards.firstWhere(
           (c) => c['last4'].toString().trim() == result.cardLast4!.trim() ||
@@ -1106,6 +1113,10 @@ class _TransactionEntryScreenState extends State<TransactionEntryScreen> {
           if (foundCard['account_id'] != null && foundCard['account_id'].toString().isNotEmpty) {
             _selectedAccountId = foundCard['account_id'].toString();
           }
+          // إذا كانت البطاقة ائتمانية نجعل طريقة الدفع مطابقة تلقائياً
+          if (foundCard['name'].toString().contains('ائتمانية') || foundCard['name'].toString().contains('فيزا') || foundCard['name'].toString().contains('كاش باك')) {
+            _paymentMethod = 'بطاقة ائتمانية';
+          }
         }
       }
 
@@ -1113,8 +1124,12 @@ class _TransactionEntryScreenState extends State<TransactionEntryScreen> {
         _selectedAccountId = widget.accounts.first['id'];
       }
 
-      if (matchedCategory != null) {
-        _selectedCategoryId = matchedCategory;
+      if (_movementType != 'دين_على_الغير') {
+        if (matchedCategory != null) {
+          _selectedCategoryId = matchedCategory;
+        }
+      } else {
+        _selectedCategoryId = null;
       }
     });
 
@@ -1139,6 +1154,9 @@ class _TransactionEntryScreenState extends State<TransactionEntryScreen> {
 
     setState(() => _isSaving = true);
 
+    // إذا كانت الحركة ديناً نلغي البند حتى لا يؤثر على الميزانيات إطلاقاً
+    final bool isDebt = (_movementType == 'دين_على_الغير');
+
     final payload = {
       "date": DateFormat('yyyy-MM-dd').format(_selectedDate),
       "amount": amt,
@@ -1147,9 +1165,9 @@ class _TransactionEntryScreenState extends State<TransactionEntryScreen> {
       "account_id": _selectedAccountId ?? (widget.accounts.isNotEmpty ? widget.accounts.first['id'] : ""),
       "card_id": _selectedCardId ?? "",
       "description": _notesController.text.trim(),
-      "category_id": _selectedTempMapId == null ? (_selectedCategoryId ?? "") : "",
-      "temp_map_id": _selectedTempMapId ?? "",
-      "temp_subcat_id": _selectedTempMapId != null ? (_selectedCategoryId ?? "") : "",
+      "category_id": isDebt ? "" : (_selectedTempMapId == null ? (_selectedCategoryId ?? "") : ""),
+      "temp_map_id": isDebt ? "" : (_selectedTempMapId ?? ""),
+      "temp_subcat_id": isDebt ? "" : (_selectedTempMapId != null ? (_selectedCategoryId ?? "") : ""),
       "user": "${widget.currentUser} (تطبيق)"
     };
 
@@ -1205,6 +1223,7 @@ class _TransactionEntryScreenState extends State<TransactionEntryScreen> {
   @override
   Widget build(BuildContext context) {
     final currentCategories = _getFilteredCategories();
+    final bool isDebt = (_movementType == 'دين_على_الغير');
 
     return SingleChildScrollView(
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
@@ -1282,8 +1301,31 @@ class _TransactionEntryScreenState extends State<TransactionEntryScreen> {
                   dropdownColor: Colors.white,
                   style: const TextStyle(color: Colors.black87, fontSize: 13),
                   decoration: _fieldStyle('نوع الحركة'),
-                  items: _movementTypes.map((t) => DropdownMenuItem(value: t, child: Text(t))).toList(),
-                  onChanged: (val) => setState(() => _movementType = val!),
+                  items: _movementTypes.map((t) {
+                    final isDebtOption = (t['value'] == 'دين_على_الغير');
+                    return DropdownMenuItem(
+                      value: t['value'],
+                      child: Text(
+                        t['label']!,
+                        style: TextStyle(
+                          color: isDebtOption ? Colors.blue.shade800 : Colors.black87,
+                          fontWeight: isDebtOption ? FontWeight.bold : FontWeight.normal,
+                        ),
+                      ),
+                    );
+                  }).toList(),
+                  onChanged: (val) {
+                    if (val != null) {
+                      setState(() {
+                        _movementType = val;
+                        if (val == 'دين_على_الغير') {
+                          _selectedCategoryId = null;
+                          _selectedTempMapId = null;
+                          _paymentMethod = 'بطاقة ائتمانية';
+                        }
+                      });
+                    }
+                  },
                 ),
               ),
               const SizedBox(width: 10),
@@ -1301,48 +1343,73 @@ class _TransactionEntryScreenState extends State<TransactionEntryScreen> {
           ),
           const SizedBox(height: 12),
 
-          DropdownButtonFormField<String?>(
-            value: _selectedTempMapId,
-            dropdownColor: Colors.white,
-            style: const TextStyle(color: Colors.black87, fontSize: 13),
-            decoration: _fieldStyle('جهة الصرف / الخريطة المؤقتة'),
-            hint: const Text('(خريطة الصرف العامة)', style: TextStyle(color: Colors.black54, fontSize: 13)),
-            items: [
-              const DropdownMenuItem<String?>(
-                value: null,
-                child: Text('بدون جهة خاصة (خريطة الصرف العامة)', style: TextStyle(color: Colors.teal, fontWeight: FontWeight.bold)),
+          // إذا كانت الحركة ديناً / ذمة، نعرض بطاقة تنبيه توضيحية ونخفي خيارات الميزانية
+          if (isDebt) ...[
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+              decoration: BoxDecoration(
+                color: Colors.blue.shade50,
+                borderRadius: BorderRadius.circular(8),
+                border: Border.all(color: Colors.blue.shade200),
               ),
-              ...widget.tempMaps.map((map) {
-                return DropdownMenuItem<String?>(
-                  value: map['id'],
-                  child: Text(map['name'] ?? '', style: const TextStyle(color: Colors.black87)),
-                );
-              }),
-            ],
-            onChanged: (val) {
-              setState(() {
-                _selectedTempMapId = val;
-                _selectedCategoryId = null;
-              });
-            },
-          ),
-          const SizedBox(height: 12),
+              child: Row(
+                children: [
+                  Icon(Icons.info_outline, color: Colors.blue.shade800, size: 20),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      'حركة دين/ذمة: تُسجل على البطاقة الائتمانية دون ربطها بأي بند صرف ودون أن تُحسب ضمن ميزانيتك الشخصية.',
+                      style: TextStyle(fontSize: 11.5, color: Colors.blue.shade900, fontWeight: FontWeight.bold),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(height: 12),
+          ] else ...[
+            DropdownButtonFormField<String?>(
+              value: _selectedTempMapId,
+              dropdownColor: Colors.white,
+              style: const TextStyle(color: Colors.black87, fontSize: 13),
+              decoration: _fieldStyle('جهة الصرف / الخريطة المؤقتة'),
+              hint: const Text('(خريطة الصرف العامة)', style: TextStyle(color: Colors.black54, fontSize: 13)),
+              items: [
+                const DropdownMenuItem<String?>(
+                  value: null,
+                  child: Text('بدون جهة خاصة (خريطة الصرف العامة)', style: TextStyle(color: Colors.teal, fontWeight: FontWeight.bold)),
+                ),
+                ...widget.tempMaps.map((map) {
+                  return DropdownMenuItem<String?>(
+                    value: map['id'],
+                    child: Text(map['name'] ?? '', style: const TextStyle(color: Colors.black87)),
+                  );
+                }),
+              ],
+              onChanged: (val) {
+                setState(() {
+                  _selectedTempMapId = val;
+                  _selectedCategoryId = null;
+                });
+              },
+            ),
+            const SizedBox(height: 12),
 
-          DropdownButtonFormField<String>(
-            value: _selectedCategoryId,
-            dropdownColor: Colors.white,
-            style: const TextStyle(color: Colors.black87, fontSize: 13),
-            decoration: _fieldStyle(_selectedTempMapId != null ? 'البند التابع للخطة المؤقتة' : 'البند الرئيسي'),
-            hint: Text(_selectedTempMapId != null ? 'اختر البند التابع للخطة...' : 'اختر البند الرئيسي...', style: const TextStyle(color: Colors.black54, fontSize: 12)),
-            items: currentCategories.map((cat) {
-              return DropdownMenuItem<String>(
-                value: cat['id'],
-                child: Text(cat['name'] ?? '', style: const TextStyle(color: Colors.black87)),
-              );
-            }).toList(),
-            onChanged: (val) => setState(() => _selectedCategoryId = val),
-          ),
-          const SizedBox(height: 12),
+            DropdownButtonFormField<String>(
+              value: _selectedCategoryId,
+              dropdownColor: Colors.white,
+              style: const TextStyle(color: Colors.black87, fontSize: 13),
+              decoration: _fieldStyle(_selectedTempMapId != null ? 'البند التابع للخطة المؤقتة' : 'البند الرئيسي'),
+              hint: Text(_selectedTempMapId != null ? 'اختر البند التابع للخطة...' : 'اختر البند الرئيسي...', style: const TextStyle(color: Colors.black54, fontSize: 12)),
+              items: currentCategories.map((cat) {
+                return DropdownMenuItem<String>(
+                  value: cat['id'],
+                  child: Text(cat['name'] ?? '', style: const TextStyle(color: Colors.black87)),
+                );
+              }).toList(),
+              onChanged: (val) => setState(() => _selectedCategoryId = val),
+            ),
+            const SizedBox(height: 12),
+          ],
 
           DropdownButtonFormField<String>(
             value: _selectedAccountId,
@@ -1390,7 +1457,7 @@ class _TransactionEntryScreenState extends State<TransactionEntryScreen> {
             controller: _notesController,
             style: const TextStyle(color: Colors.black87),
             decoration: _fieldStyle('البيان / سبب الشراء').copyWith(
-              hintText: 'مثال: وقود، تموينات...',
+              hintText: isDebt ? 'مثال: مشتريات صيدلية (دين على زوجتي)' : 'مثال: وقود، تموينات...',
               hintStyle: const TextStyle(fontSize: 12, color: Colors.black38),
             ),
           ),
@@ -1398,7 +1465,7 @@ class _TransactionEntryScreenState extends State<TransactionEntryScreen> {
 
           ElevatedButton.icon(
             style: ElevatedButton.styleFrom(
-              backgroundColor: const Color(0xFF0F4C81),
+              backgroundColor: isDebt ? Colors.blue.shade800 : const Color(0xFF0F4C81),
               padding: const EdgeInsets.symmetric(vertical: 14),
               elevation: 2,
               shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
@@ -1407,7 +1474,7 @@ class _TransactionEntryScreenState extends State<TransactionEntryScreen> {
                 ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
                 : const Icon(Icons.check, color: Colors.white),
             label: Text(
-              _isSaving ? 'جاري الحفظ...' : 'حفظ الحركة المالية',
+              _isSaving ? 'جاري الحفظ...' : (isDebt ? 'حفظ الحركة كـ (دين / ذمة)' : 'حفظ الحركة المالية'),
               style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Colors.white),
             ),
             onPressed: _isSaving ? null : _submitData,
